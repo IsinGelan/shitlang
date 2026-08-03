@@ -4,9 +4,9 @@ from typing import Iterable, Iterator
 
 from pydantic import BaseModel
 
-import lisp_objs as lo
-from shit_errors import raise_const_undeclared, raise_type_undeclared
-from shit_parser import FileData
+from . import lisp_objs as lo
+from .shit_errors import raise_const_undeclared, raise_type_undeclared
+from .shit_parser import FileData
 
 # ================================
 def pairs_overlapping[T](it: Iterable[T]) -> Iterator[tuple[T, T]]:
@@ -445,6 +445,10 @@ class ShitFile(ShitObject):
         undeclared_types = file_data.found_types - {t for typ in declared_types for t in typ.names}
         if undeclared_types:
             raise_type_undeclared(list(undeclared_types))
+        declared_pred_signatures = {(p.name, len(p.params)) for p in declared_predicates}
+        undeclared_predicates = file_data.found_predicates - declared_pred_signatures
+        if undeclared_predicates:
+            raise ValueError(f"Undeclared predicates found: {undeclared_predicates}")
 
         top_level_elems = [dict_to_top_level(e) for e in d.get("file_elements", [])]
 

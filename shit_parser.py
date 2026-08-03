@@ -11,9 +11,10 @@ pp.ParserElement.set_default_whitespace_chars(" \t")
 
 get_inner = lambda t: t[0] if len(t) == 1 else t
 
-file_constants = set()
-file_types = set()
-current_params = set()
+file_constants: set[str] = set()
+file_types: set[str] = set()
+file_preds: set[tuple[str, int]] = set()
+current_params: set[str] = set()
 
 def set_current_params(tokens: pp.ParseResults):
     elems = tokens[0]
@@ -32,7 +33,13 @@ def add_file_type(tokens: pp.ParseResults):
         return
     name = tokens[0]
     file_types.add(name)
-    print("Types in file now:", file_types)
+def add_file_pred(tokens: pp.ParseResults):
+    tok = tokens[0]
+    name, *args = tok
+    arity = len(args)
+    file_preds.add((name, arity))
+def reset_file_preds():
+    file_preds.clear()
 
 def identify_id_type(tokens):
     tok = tokens[0]
@@ -66,7 +73,7 @@ args = pp.Group(pp.Opt(
         pp.Suppress("(")
         + pp.Opt(pp.DelimitedList(arg))
         + pp.Suppress(")")
-    ))#.set_parse_action(lambda t: print("ARGS", t.as_dict()))
+    ))
 true_args = (
     pp.Suppress("(")
     + pp.Opt(pp.DelimitedList(arg))
@@ -76,11 +83,12 @@ true_args = (
 call = pp.Group(
     name.set_results_name("name")
     + args.set_results_name("args")
-    ).set_results_name("call")#.set_parse_action(lambda t: print("CALL", t.as_dict()))
+    ).set_results_name("call")
 true_call = pp.Group(
     name.set_results_name("name")
     + true_args.set_results_name("args")
     ).set_results_name("call")
+predicate_call = true_call.copy().add_parse_action(add_file_pred)
 
 # ----------------------
 # comparisons
@@ -94,7 +102,7 @@ expr_comparison = pp.Group(
     + comparator.set_results_name("comparator")
     + expr_value.set_results_name("right")
     ).set_results_name("comparison")
-logical_expr = true_call ^ expr_comparison
+logical_expr = predicate_call ^ expr_comparison
 
 # ----------------------
 # precondtion, postcondition
@@ -211,7 +219,7 @@ pred_declarations = pp.Group(
 # top level
 comment = pp.Group(pp.Suppress("#") + pp.rest_of_line.set_results_name("content")).set_results_name("comment")
 
-element_delim = pp.Suppress(pp.Regex(r"[ \t\n]*\n"))
+element_delim = pp.Suppress(pp.Regex(r"[ \t\n]*"))
 file_header = pp.Group(
     domain_name + element_delim
     + type_declarations + pp.Opt(element_delim)
@@ -235,6 +243,7 @@ file = pp.Group(
 class FileData(NamedTuple):
     found_constants: set[str]
     found_types: set[str]
+    found_predicates: set[tuple[str, int]] = set()
 
 
 # ================================
@@ -242,11 +251,14 @@ def shit_to_dicts(code: str) -> tuple[dict, FileData]:
     """returns dict, constants from file"""
     reset_file_constants()
     reset_file_types()
+    reset_file_preds()
+    res = file.parse_string(code+"\n", parse_all=True).as_dict().get("file", {})
     file_data = FileData(
         found_constants=file_constants,
-        found_types=file_types)
+        found_types=file_types,
+        found_predicates=file_preds)
     return (
-        file.parse_string(code+"\n", parse_all=True).as_dict().get("file", {}),
+        res,
         file_data)
 
 def make_parsing_graph(nonterminal: pp.ParserElement = file):

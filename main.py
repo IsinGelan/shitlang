@@ -1,6 +1,6 @@
 
-from shit_parser import shit_to_dicts
-from shit_objs import dicts_to_shit_objects
+from .shit_parser import shit_to_dicts
+from .shit_objs import dicts_to_shit_objects
 
 # ================================
 # Example of some SHIT:
@@ -66,8 +66,8 @@ def transpile_file_to_file(input_filename: str, output_filename: str):
 
 # code = EXAMPLE
 # transpile_str_to_file(code, "test_output.hddl")
-
-transpile_file_to_file("example.shit", "example.hddl")
+if __name__ == "__main__":
+    transpile_file_to_file("example.shit", "example.hddl")
 
 
 
