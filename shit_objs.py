@@ -5,7 +5,7 @@ from typing import Iterable, Iterator
 from pydantic import BaseModel
 
 from . import lisp_objs as lo
-from .shit_errors import raise_const_undeclared, raise_type_undeclared
+from .shit_errors import UndeclaredConstsError, UndeclaredExecutablesError, UndeclaredPredicatesError, UndeclaredTypesError, raise_const_undeclared, raise_type_undeclared
 from .shit_parser import FileData
 
 # ================================
@@ -434,21 +434,25 @@ class ShitFile(ShitObject):
         const_decls = d["file_header"]["const_declarations"]
         pred_decls = d["file_header"]["pred_declarations"]
 
-        declared_types = [ShitTypes.from_dict(ty) for ty in type_decls]
         declared_constants = [ShitConstants.from_dict(const) for const in const_decls]
+        declared_types = [ShitTypes.from_dict(ty) for ty in type_decls]
         declared_predicates = [ShitPredicate.from_dict(pred) for pred in pred_decls]
+        declared_pred_signatures = {(p.name, len(p.params)) for p in declared_predicates}
 
         undeclared_constants = file_data.found_constants - {c for const in declared_constants for c in const.names}
+        undeclared_types = file_data.found_types - {t for typ in declared_types for t in typ.names}
+        undeclared_predicates = file_data.found_predicates - declared_pred_signatures
+        undeclared_executables = file_data.found_exec_calls - file_data.found_exec_decls
+
         if undeclared_constants:
             declared_constants.append(ShitConstants.from_undeclared(undeclared_constants))
-            raise_const_undeclared(list(undeclared_constants))
-        undeclared_types = file_data.found_types - {t for typ in declared_types for t in typ.names}
+            raise UndeclaredConstsError(list(undeclared_constants))
         if undeclared_types:
-            raise_type_undeclared(list(undeclared_types))
-        declared_pred_signatures = {(p.name, len(p.params)) for p in declared_predicates}
-        undeclared_predicates = file_data.found_predicates - declared_pred_signatures
+            raise UndeclaredTypesError(list(undeclared_types))
         if undeclared_predicates:
-            raise ValueError(f"Undeclared predicates found: {undeclared_predicates}")
+            raise UndeclaredPredicatesError(undeclared_predicates)
+        if undeclared_executables:
+            raise UndeclaredExecutablesError(undeclared_executables)
 
         top_level_elems = [dict_to_top_level(e) for e in d.get("file_elements", [])]
 

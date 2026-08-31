@@ -49,7 +49,7 @@ def export_dicts_to_json(dicts: dict, filename: str):
 
 def transpile_str_to_str(code: str) -> list[str]:
     dicts, file_data = shit_to_dicts(code)
-    export_dicts_to_json(dicts, "example_dump.json")
+    #export_dicts_to_json(dicts, "example_dump.json")
     file = dicts_to_shit_objects(dicts, file_data)
     return file.to_lisp_obj().to_hddl_str()
 

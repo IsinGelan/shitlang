@@ -14,6 +14,8 @@ get_inner = lambda t: t[0] if len(t) == 1 else t
 file_constants: set[str] = set()
 file_types: set[str] = set()
 file_preds: set[tuple[str, int]] = set()
+file_called_execs: set[tuple[str, int]] = set()
+file_declared_execs: set[tuple[str, int]] = set()
 current_params: set[str] = set()
 
 def set_current_params(tokens: pp.ParseResults):
@@ -40,6 +42,21 @@ def add_file_pred(tokens: pp.ParseResults):
     file_preds.add((name, arity))
 def reset_file_preds():
     file_preds.clear()
+def add_file_exec_call(tokens: pp.ParseResults):
+    content = tokens[0][0]
+    name, args = content
+    file_called_execs.add((name, len(args)))
+def reset_file_exec_calls():
+    file_called_execs.clear()
+def add_file_action_decl(tokens: pp.ParseResults):
+    name, args = tokens
+    file_declared_execs.add((name, len(args)))
+def add_file_task_decl(tokens: pp.ParseResults):
+    content = tokens[0]
+    name, args = content
+    file_declared_execs.add((name, len(args)))
+def reset_file_exec_decls():
+    file_declared_execs.clear()
 
 def identify_id_type(tokens):
     tok = tokens[0]
@@ -117,11 +134,11 @@ action_postcondition = pp.ZeroOrMore(
 
 # ----------------------
 # subtasks
-subtask_uo = pp.Group(number.set_results_name("id") + call)
+subtask_uo = pp.Group(number.set_results_name("id") + call).set_parse_action(add_file_exec_call)
 subtasks_unordered = pp.Group(
     pp.OneOrMore(subtask_uo + pp.Suppress("\n"))
     ).set_results_name("subtasks_unordered")
-subtask_seq = pp.Group(pp.Suppress("-") + call)
+subtask_seq = pp.Group(pp.Suppress("-") + call).set_parse_action(add_file_exec_call)
 subtasks_sequence = pp.Group(
     pp.OneOrMore(subtask_seq + pp.Suppress("\n"))
     ).set_results_name("subtasks_sequence")#.add_parse_action(lambda t: print("SEQ", t))
@@ -142,7 +159,7 @@ task = pp.Group(
     pp.Suppress("task")
     + name.set_results_name("task_name")
     + params.set_results_name("task_params")
-).set_results_name("task")
+).set_results_name("task").set_parse_action(add_file_task_decl)
 
 method_identifier = (
     name.set_results_name("task_name")
@@ -170,7 +187,7 @@ action_head = (
     + name.set_results_name("action_name")
     + params.set_results_name("action_params")
     + pp.Suppress("\n")
-    )
+    ).set_parse_action(add_file_action_decl)
 
 incomplete_ellipsis = pp.Group(pp.Suppress("...\n")).set_results_name("incomplete_ellipsis")
 
@@ -243,7 +260,9 @@ file = pp.Group(
 class FileData(NamedTuple):
     found_constants: set[str]
     found_types: set[str]
-    found_predicates: set[tuple[str, int]] = set()
+    found_predicates: set[tuple[str, int]]
+    found_exec_calls: set[tuple[str, int]]
+    found_exec_decls: set[tuple[str, int]]
 
 
 # ================================
@@ -252,11 +271,15 @@ def shit_to_dicts(code: str) -> tuple[dict, FileData]:
     reset_file_constants()
     reset_file_types()
     reset_file_preds()
+    reset_file_exec_calls()
+    reset_file_exec_decls()
     res = file.parse_string(code+"\n", parse_all=True).as_dict().get("file", {})
     file_data = FileData(
         found_constants=file_constants,
         found_types=file_types,
-        found_predicates=file_preds)
+        found_predicates=file_preds,
+        found_exec_calls=file_called_execs,
+        found_exec_decls=file_declared_execs)
     return (
         res,
         file_data)
