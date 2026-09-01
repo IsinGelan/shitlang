@@ -16,6 +16,7 @@ file_types: set[str] = set()
 file_preds: set[tuple[str, int]] = set()
 file_called_execs: set[tuple[str, int]] = set()
 file_declared_execs: set[tuple[str, int]] = set()
+file_negative_facts: bool = False
 current_params: set[str] = set()
 
 def set_current_params(tokens: pp.ParseResults):
@@ -37,6 +38,10 @@ def add_file_type(tokens: pp.ParseResults):
     file_types.add(name)
 def add_file_pred(tokens: pp.ParseResults):
     tok = tokens[0]
+    if tok[0] in ("!", "~"):
+        global file_negative_facts
+        file_negative_facts = True
+        tok = tok[1:]
     name, *args = tok
     arity = len(args)
     file_preds.add((name, arity))
@@ -57,6 +62,17 @@ def add_file_task_decl(tokens: pp.ParseResults):
     file_declared_execs.add((name, len(args)))
 def reset_file_exec_decls():
     file_declared_execs.clear()
+def reset_negative_facts():
+    global file_negative_facts
+    file_negative_facts = False
+
+def reset_file_data():
+    reset_file_constants()
+    reset_file_types()
+    reset_file_preds()
+    reset_file_exec_calls()
+    reset_file_exec_decls()
+    reset_negative_facts()
 
 def identify_id_type(tokens):
     tok = tokens[0]
@@ -105,7 +121,12 @@ true_call = pp.Group(
     name.set_results_name("name")
     + true_args.set_results_name("args")
     ).set_results_name("call")
-predicate_call = true_call.copy().add_parse_action(add_file_pred)
+predicate_call = pp.Group(
+    pp.Opt(pp.Literal("!") | pp.Literal("~")).set_results_name("negated")
+    + name.set_results_name("name")
+    + true_args.set_results_name("args")
+    ).set_results_name("call").add_parse_action(add_file_pred)
+# predicate_call = true_call.copy().add_parse_action(add_file_pred)
 
 # ----------------------
 # comparisons
@@ -263,23 +284,21 @@ class FileData(NamedTuple):
     found_predicates: set[tuple[str, int]]
     found_exec_calls: set[tuple[str, int]]
     found_exec_decls: set[tuple[str, int]]
+    found_negative_facts: bool
 
 
 # ================================
 def shit_to_dicts(code: str) -> tuple[dict, FileData]:
     """returns dict, constants from file"""
-    reset_file_constants()
-    reset_file_types()
-    reset_file_preds()
-    reset_file_exec_calls()
-    reset_file_exec_decls()
+    reset_file_data()
     res = file.parse_string(code+"\n", parse_all=True).as_dict().get("file", {})
     file_data = FileData(
         found_constants=file_constants,
         found_types=file_types,
         found_predicates=file_preds,
         found_exec_calls=file_called_execs,
-        found_exec_decls=file_declared_execs)
+        found_exec_decls=file_declared_execs,
+        found_negative_facts=file_negative_facts)
     return (
         res,
         file_data)

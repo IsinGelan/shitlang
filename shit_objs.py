@@ -5,7 +5,7 @@ from typing import Iterable, Iterator
 from pydantic import BaseModel
 
 from . import lisp_objs as lo
-from .shit_errors import UndeclaredConstsError, UndeclaredExecutablesError, UndeclaredPredicatesError, UndeclaredTypesError, raise_const_undeclared, raise_type_undeclared
+from .shit_errors import UndeclaredConstsError, UndeclaredExecutablesError, UndeclaredPredicatesError, UndeclaredTypesError
 from .shit_parser import FileData
 
 # ================================
@@ -98,22 +98,28 @@ class ComparisonExpr(LogicalExpr):
             )
 
 class FactExpr(LogicalExpr):
+    negated: bool = False
     predicate_name: str
     args: list[ValuedExpr]
 
     @classmethod
     def from_dict(cls, d):
         return cls(
+            negated="negated" in d,
             predicate_name=d["name"],
             args=[dict_to_valued_expr(arg) for arg in d["args"]]
         )
     
     def to_lisp_objs(self):
         # TODO: differentiate vars from consts
-        yield lo.HeadArgsInline(
+        inner = lo.HeadArgsInline(
             self.predicate_name,
             [arg.to_lisp_obj() for arg in self.args]
         )
+        if self.negated:
+            yield lo.HeadArgsInline("not", [inner])
+        else:
+            yield inner
 
 
 # ================================
@@ -425,6 +431,7 @@ class ShitFile(ShitObject):
     declared_predicates: list[ShitPredicate] # predicates declared with a pred statement
     found_constants: set[str] = set() # constants found in the code
     found_types: set[str] = set() # types found in the code
+    found_negative_facts: bool = False # whether negative facts were found in the code
     
     top_level_elements: list[TopLevel]
 
@@ -463,7 +470,8 @@ class ShitFile(ShitObject):
             declared_predicates=declared_predicates,
             top_level_elements=top_level_elems,
             found_constants=file_data.found_constants,
-            found_types=file_data.found_types
+            found_types=file_data.found_types,
+            found_negative_facts=file_data.found_negative_facts
         )
 
     def model_post_init(self, context):
@@ -475,9 +483,11 @@ class ShitFile(ShitObject):
         self.validate_task_methods()
         self.set_method_task_params()
 
-    def analyze_requirements(self) -> list[str]:
+    def analyze_requirements(self) -> Iterator[str]:
         # TODO: analyze the structure to find the actual requirements
-        return [":hierarchy", ":typing"]
+        yield from [":hierarchy", ":typing", ":method-preconditions"]
+        if self.found_negative_facts:
+            yield ":negative-preconditions"
     
     def tasks_signatures(self) -> dict[str, list[Param]]:
         signatures = {}
