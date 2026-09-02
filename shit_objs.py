@@ -1,6 +1,6 @@
 
 from itertools import product, chain
-from typing import Iterable, Iterator
+from typing import Callable, Iterable, Iterator
 
 from pydantic import BaseModel
 
@@ -17,12 +17,16 @@ def pairs_overlapping[T](it: Iterable[T]) -> Iterator[tuple[T, T]]:
         last = el
 
 # ================================
-class ShitObject(BaseModel):
-    pass
+NodePredicate = Callable[["ShitObject"], bool]
 
+class ShitObject(BaseModel):
     @classmethod
     def from_dict(cls, d: dict):
         raise NotImplementedError
+
+    @property
+    def children(self) -> Iterator["ShitObject"]:
+        yield from []
 
     def to_lisp_objs(self) -> Iterator[lo.LispObject]:
         raise NotImplementedError
@@ -32,6 +36,20 @@ class ShitObject(BaseModel):
         if len(lisp_objs) != 1:
             raise ValueError(f"Expected 1 lisp object, got {len(lisp_objs)}")
         return lisp_objs[0]
+
+    def traverse(
+            self,
+            node_filter: NodePredicate,
+            regard_children: NodePredicate = lambda x: True
+            ) -> Iterator["ShitObject"]:
+        """Traverse the tree of ShitObjects, yielding all nodes that match the node_filter.\n
+        if regard_children is False on a node, its children will not be traversed."""
+        if node_filter(self):
+            yield self
+        if not regard_children(self):
+            return
+        for child in self.children:
+            yield from child.traverse(node_filter, regard_children)
 
 # ================================
 class FunctionCall(ShitObject):
@@ -45,6 +63,10 @@ class FunctionCall(ShitObject):
             function_name=d["name"],
             args=[dict_to_valued_expr(arg) for arg in d["args"]]
         )
+
+    @property
+    def children(self) -> Iterator["ShitObject"]:
+        yield from self.args
     
     def to_lisp_objs(self):
         # TODO: differentiate vars from consts
@@ -90,6 +112,11 @@ class ComparisonExpr(LogicalExpr):
             operator=d["comparator"],
             right=dict_to_valued_expr(right)
         )
+
+    @property
+    def children(self) -> Iterator["ShitObject"]:
+        yield self.left
+        yield self.right
     
     def to_lisp_objs(self):
         yield lo.HeadArgsInline(
@@ -109,7 +136,11 @@ class FactExpr(LogicalExpr):
             predicate_name=d["name"],
             args=[dict_to_valued_expr(arg) for arg in d["args"]]
         )
-    
+
+    @property
+    def children(self) -> Iterator["ShitObject"]:
+        yield from self.args
+
     def to_lisp_objs(self):
         # TODO: differentiate vars from consts
         inner = lo.HeadArgsInline(
@@ -133,7 +164,11 @@ class TaskCall(ShitObject):
             task_name=d["name"],
             args=[dict_to_valued_expr(arg) for arg in d["args"]]
         )
-    
+
+    @property
+    def children(self) -> Iterator["ShitObject"]:
+        yield from self.args
+
     def to_lisp_objs(self):
         # TODO: differentiate vars from consts
         yield lo.HeadArgsInline(
@@ -164,6 +199,10 @@ class SubtasksWithOrdering(Subtasks):
             },
             orderings=int_oderings
         )
+
+    @property
+    def children(self) -> Iterator["ShitObject"]:
+        yield from self.subtasks.values()
     
     def all_relationships(self) -> Iterator[tuple[int, int]]:
         for ordering_groups in self.orderings:
@@ -172,7 +211,6 @@ class SubtasksWithOrdering(Subtasks):
                 orderings = product(group1, group2)
                 yield from orderings
 
-    
     def to_lisp_objs(self):
         yield lo.KeyVal(
             key=":subtasks",
@@ -209,7 +247,11 @@ class SequencedSubtasks(Subtasks):
                 for t in d["subtasks_sequence"]
             ]
         )
-    
+
+    @property
+    def children(self) -> Iterator["ShitObject"]:
+        yield from self.subtasks
+
     def to_lisp_objs(self):
         val_lisp = lo.HeadArgsIndented("and", [t.to_lisp_obj() for t in self.subtasks]
         ) if self.subtasks else lo.HeadArgsInline("and", [])
@@ -284,6 +326,12 @@ class Method(TopLevel):
             subtasks=dict_to_subtasks(d)
         )
 
+    @property
+    def children(self) -> Iterator["ShitObject"]:
+        yield from self.params
+        yield from self.precondition
+        yield self.subtasks
+
     def _set_task_params(self, task_params: list[Param]):
         """Set params of this method's task"""
         self._task_params = task_params
@@ -331,6 +379,12 @@ class Action(TopLevel):
             precondition=[dict_to_logical_expr(p) for p in d["precondition"]],
             postcondition=[dict_to_logical_expr(p) for p in d["postcondition"]]
         )
+
+    @property
+    def children(self) -> Iterator["ShitObject"]:
+        yield from self.params
+        yield from self.precondition
+        yield from self.postcondition
     
     def to_lisp_objs(self):
         params = lo.ListInline([p.to_lisp_obj() for p in self.params])
@@ -416,6 +470,10 @@ class ShitPredicate(ShitObject):
             name=d["pred_name"],
             params=[Param.from_dict(p) for p in d["pred_params"]]
         )
+
+    @property
+    def children(self) -> Iterator["ShitObject"]:
+        yield from self.params
     
     def to_lisp_objs(self):
         yield lo.HeadArgsInline(
@@ -483,11 +541,27 @@ class ShitFile(ShitObject):
         self.validate_task_methods()
         self.set_method_task_params()
 
+    @property
+    def children(self) -> Iterator["ShitObject"]:
+        yield from self.declared_types
+        yield from self.declared_constants
+        yield from self.declared_predicates
+        yield from self.top_level_elements
+
     def analyze_requirements(self) -> Iterator[str]:
         # TODO: analyze the structure to find the actual requirements
-        yield from [":hierarchy", ":typing", ":method-preconditions"]
+        yield from [":typing"]
+        if any(
+            isinstance(child, Task) or isinstance(child, Method)
+            for child in self.top_level_elements):
+            yield ":hierarchy"
+        if any(
+            isinstance(child, Method) and child.precondition
+            for child in self.top_level_elements):
+            yield ":method-preconditions"
         if self.found_negative_facts:
             yield ":negative-preconditions"
+        # TODO: implement requirements for functions etc
     
     def tasks_signatures(self) -> dict[str, list[Param]]:
         signatures = {}
