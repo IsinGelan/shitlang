@@ -255,7 +255,10 @@ pred_declarations = pp.Group(
 
 # ----------------------
 # top level
-comment = pp.Group(pp.Suppress("#") + pp.rest_of_line.set_results_name("content")).set_results_name("comment")
+comment_include = pp.Group(pp.Suppress("##") + pp.rest_of_line.set_results_name("content")).set_results_name("comment")
+#pp.Regex(r"##[^\n]*").set_results_name("comment")
+comment_ignore = pp.Regex("((?<!#))#(?!#)") + pp.SkipTo(pp.LineEnd())
+#pp.Regex(r"#[^\n#][^\n]*")
 
 element_delim = pp.Suppress(pp.Regex(r"[ \t\n]*"))
 file_header = pp.Group(
@@ -265,7 +268,7 @@ file_header = pp.Group(
     + pred_declarations
 ).set_fail_action(lambda *_: print("File header expected: domain, types, constants"))
 
-shit_element = pp.Group(task) ^ pp.Group(method) ^ pp.Group(action) ^ pp.Group(comment)
+shit_element = pp.Group(task) ^ pp.Group(method) ^ pp.Group(action) ^ pp.Group(comment_include)
 
 file = pp.Group(
     pp.Opt(element_delim)
@@ -274,7 +277,7 @@ file = pp.Group(
     + pp.Group(
         pp.ZeroOrMore(shit_element + element_delim)
     ).set_results_name("file_elements")
-    ).set_results_name("file")
+    ).ignore(comment_ignore).set_results_name("file")
 
 
 # ================================
