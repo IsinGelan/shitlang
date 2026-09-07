@@ -1,8 +1,9 @@
 
-from typing import Callable
+from typing import Callable, Literal
 
-from .shit_parser import shit_to_dicts
-from .shit_objs import dicts_to_shit_objects
+from .parser_domain import to_dicts as domain_to_dicts
+from .parser_problem import to_dicts as problem_to_dicts
+from .shit_objs import DomainFile, ProblemFile
 
 # ================================
 # Example of some SHIT:
@@ -37,66 +38,86 @@ action complete-end-portal
   => near_structure(lit_end_portal)
 """
 
-MACRO_ERROR_PATH = "error_code_w_macro.shit"
-MACRO_RESULT_PATH = "code_w_macro.shit"
+PATHS = {
+    ("domain", False): "domain_w_macro.shit",
+    ("domain", True): "error_domain_w_macro.shit",
+    ("problem", False): "problem_w_macro.shit",
+    ("problem", True): "error_problem_w_macro.shit"
+}
 
 # Function that modifies the source code before compilation
 CodeMacro = Callable[[str], str]
+FileType = Literal["domain", "problem"]
 
 # ================================
-def save_macro_code_file(code: str, error: bool = False):
-    path = MACRO_ERROR_PATH if error else MACRO_RESULT_PATH
+def save_macro_code_file(code: str, ft: FileType, error: bool = False):
+    path = PATHS[(ft, error)]
     with open(path, "w", encoding="utf-8") as file:
         file.write(code)
 
-# ================================
-def export_dicts_to_json(dicts: dict, filename: str):
-    import json
-    with open(filename, "w") as f:
-        json.dump(dicts, f, indent=4)
 
-def transpile_str_to_str(
+def transpile_domain_str(
         code: str, *,
         macro_funs: list[CodeMacro] = [],
-        show_macro_result: bool = False) -> list[str]:
+        show_macro_result: bool = False) -> DomainFile:
+    
     for macro_fun in macro_funs:
         code = macro_fun(code)
     
     try:
-        dicts, file_data = shit_to_dicts(code)
-        file = dicts_to_shit_objects(dicts, file_data)
+        dicts, file_data = domain_to_dicts(code)
+        file = DomainFile.from_dict(dicts, file_data)
     except Exception as e:
         if macro_funs:
-            save_macro_code_file(code, error=True)
+            save_macro_code_file(code, ft="domain", error=True)
             print("Error with applied macros:")
         raise e
     else:
         if show_macro_result:
-            save_macro_code_file(code)
+            save_macro_code_file(code, ft="domain", error=False)
 
-    #export_dicts_to_json(dicts, "example_dump.json")
-    return file.to_lisp_obj().to_hddl_str()
+    return file
 
-def transpile_str_to_file(
-        code: str, filename: str, *,
+def transpile_domain(
+        filename: str,
         macro_funs: list[CodeMacro] = [],
-        show_macro_result: bool = False):
-    res = transpile_str_to_str(
+        show_macro_result: bool = False) -> DomainFile:
+    with open(filename, "r", encoding="utf-8") as file:
+        code = file.read()
+    return transpile_domain_str(
         code,
         macro_funs=macro_funs,
         show_macro_result=show_macro_result)
-    with open(filename, "w") as f:
-        f.write(res)
 
-def transpile_file_to_file(
-        input_filename: str,
-        output_filename: str, *,
+def transpile_problem_str(
+        code: str, *,
         macro_funs: list[CodeMacro] = [],
-        show_macro_result: bool = False):
-    with open(input_filename, "r") as f:
-        code = f.read()
-    transpile_str_to_file(
+        show_macro_result: bool = False) -> DomainFile:
+
+    for macro_fun in macro_funs:
+        code = macro_fun(code)
+
+    try:
+        dicts = problem_to_dicts(code)
+        file = ProblemFile.from_dict(dicts)
+    except Exception as e:
+        if macro_funs:
+            save_macro_code_file(code, ft="problem", error=True)
+            print("Error with applied macros:")
+        raise e
+    else:
+        if show_macro_result:
+            save_macro_code_file(code, ft="problem", error=False)
+
+    return file
+
+def transpile_problem(
+        filename: str,
+        macro_funs: list[CodeMacro] = [],
+        show_macro_result: bool = False) -> DomainFile:
+    with open(filename, "r", encoding="utf-8") as file:
+        code = file.read()
+    return transpile_problem_str(
         code,
-        output_filename,
         macro_funs=macro_funs,
         show_macro_result=show_macro_result)

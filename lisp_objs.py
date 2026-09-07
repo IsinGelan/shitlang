@@ -1,8 +1,6 @@
 
 from typing import Iterable, Self
 
-from pydantic import BaseModel
-
 INDENT = "    "
 
 def first_line(indent_level: int, *words: str, start_indent: bool = False) -> str:

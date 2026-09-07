@@ -5,8 +5,13 @@ from typing import Callable, Iterable, Iterator
 from pydantic import BaseModel
 
 from . import lisp_objs as lo
-from .shit_errors import UndeclaredConstsError, UndeclaredExecutablesError, UndeclaredPredicatesError, UndeclaredTypesError
-from .shit_parser import FileData
+from .shit_errors import (
+    UndeclaredConstsError,
+    UndeclaredExecutablesError,
+    UndeclaredPredicatesError,
+    UndeclaredTypesError
+)
+from .parser_domain import FileData
 
 # ================================
 def pairs_overlapping[T](it: Iterable[T]) -> Iterator[tuple[T, T]]:
@@ -438,7 +443,7 @@ class ShitTypes(ShitObject):
         for typ in self.names: 
             yield lo.Name(f"{typ} - {self.supertype}")
 
-class ShitConstants(ShitObject):
+class ShitObjects(ShitObject):
     names: list[str]
     type: str
 
@@ -481,11 +486,11 @@ class ShitPredicate(ShitObject):
             [param.to_lisp_obj() for param in self.params])
 
 # ================================ 
-class ShitFile(ShitObject):
+class DomainFile(ShitObject):
     domain_name: str
     # types: list[tuple[str, str]]
     declared_types: list[ShitTypes] # types declared with a type statement
-    declared_constants: list[ShitConstants] # constants declared with a const statement
+    declared_constants: list[ShitObjects] # constants declared with a const statement
     declared_predicates: list[ShitPredicate] # predicates declared with a pred statement
     found_constants: set[str] = set() # constants found in the code
     found_types: set[str] = set() # types found in the code
@@ -499,7 +504,7 @@ class ShitFile(ShitObject):
         const_decls = d["file_header"]["const_declarations"]
         pred_decls = d["file_header"]["pred_declarations"]
 
-        declared_constants = [ShitConstants.from_dict(const) for const in const_decls]
+        declared_constants = [ShitObjects.from_dict(const) for const in const_decls]
         declared_types = [ShitTypes.from_dict(ty) for ty in type_decls]
         declared_predicates = [ShitPredicate.from_dict(pred) for pred in pred_decls]
         declared_pred_signatures = {(p.name, len(p.params)) for p in declared_predicates}
@@ -510,7 +515,7 @@ class ShitFile(ShitObject):
         undeclared_executables = file_data.found_exec_calls - file_data.found_exec_decls
 
         if undeclared_constants:
-            declared_constants.append(ShitConstants.from_undeclared(undeclared_constants))
+            declared_constants.append(ShitObjects.from_undeclared(undeclared_constants))
             raise UndeclaredConstsError(list(undeclared_constants))
         if undeclared_types:
             raise UndeclaredTypesError(list(undeclared_types))
@@ -639,6 +644,64 @@ class ShitFile(ShitObject):
                 *[elem.to_lisp_obj() for elem in self.top_level_elements]
             ])
 
+    def to_str(self) -> str:
+        return self.to_lisp_obj().to_hddl_str()
+    
+    def write_to_file(self, filename: str):
+        with open(filename, "w") as f:
+            f.write(self.to_str())
+
+
+# ================================
+class ProblemFile(ShitObject):
+    domain_name: str
+    problem_name: str
+
+    goal: TaskCall
+    obj_declarations: list[ShitObjects]
+    fact_declarations: list[FactExpr]
+
+    @classmethod
+    def from_dict(cls, d: dict):
+        obj_decls = [ShitObjects.from_dict(obj) for obj in d["obj_declarations"]]
+        fact_decls = [FactExpr.from_dict(fact) for fact in d["fact_declarations"]]
+        return cls(
+            domain_name=d["domain_name"],
+            problem_name=d["problem_name"],
+            goal=TaskCall.from_dict(d["goal"]),
+            obj_declarations=obj_decls,
+            fact_declarations=fact_decls
+        )
+
+    def to_lisp_objs(self):
+        yield lo.HeadArgsFirstChildInline(
+            "define",
+            [
+                lo.HeadArgsInline("problem", [lo.Name(self.problem_name)]),
+                lo.HeadArgsInline(":domain", [lo.Name(self.domain_name)]),
+                lo.HeadArgsInline(
+                    ":htn",
+                    [lo.Name(":tasks"), self.goal.to_lisp_obj()]
+                ),
+                lo.HeadArgsIndented(
+                    ":objects",
+                    chain.from_iterable(obj.to_lisp_objs() for obj in self.obj_declarations)
+                ),
+                lo.HeadArgsIndented(
+                    ":init",
+                    [fact.to_lisp_obj() for fact in self.fact_declarations]
+                )
+            ]
+        )
+
+    def to_str(self) -> str:
+        return self.to_lisp_obj().to_hddl_str()
+    
+    def write_to_file(self, filename: str):
+        with open(filename, "w") as f:
+            f.write(self.to_str())
+
+
 # ================================
 def dict_to_valued_expr(d: dict) -> ValuedExpr:
     match d:
@@ -690,5 +753,5 @@ def dict_to_top_level(d: dict) -> TopLevel:
     raise ValueError(f"Invalid top-level element: {d}")
 
 # ================================
-def dicts_to_shit_objects(dicts: list[dict], file_data: FileData) -> ShitFile:
-    return ShitFile.from_dict(dicts, file_data)
+def dicts_to_domain_file(dicts: list[dict], file_data: FileData) -> DomainFile:
+    return DomainFile.from_dict(dicts, file_data)

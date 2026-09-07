@@ -1,7 +1,8 @@
 
 from .main import (
-    transpile_file_to_file,
-    transpile_str_to_file,
-    transpile_str_to_str,
+    transpile_domain,
+    transpile_domain_str,
+    transpile_problem,
+    transpile_problem_str,
     EXAMPLE
 )

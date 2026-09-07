@@ -87,7 +87,6 @@ def number_dict(tokens):
 # ================================
 name = pp.Word(pp.alphas, pp.alphanums + "-_")
 number = pp.Word(pp.nums).set_parse_action(number_dict)
-# number = pp.Word(pp.nums).set_results_name("number")
 
 identifier = pp.Word(pp.alphas, pp.alphanums + "-_").set_parse_action(identify_id_type)
 param = pp.Group(
@@ -255,10 +254,11 @@ pred_declarations = pp.Group(
 
 # ----------------------
 # top level
-comment_include = pp.Group(pp.Suppress("##") + pp.rest_of_line.set_results_name("content")).set_results_name("comment")
-#pp.Regex(r"##[^\n]*").set_results_name("comment")
+comment_include = pp.Group(
+    pp.Suppress("##")
+    + pp.rest_of_line.set_results_name("content")
+    ).set_results_name("comment")
 comment_ignore = pp.Regex("((?<!#))#(?!#)") + pp.SkipTo(pp.LineEnd())
-#pp.Regex(r"#[^\n#][^\n]*")
 
 element_delim = pp.Suppress(pp.Regex(r"[ \t\n]*"))
 file_header = pp.Group(
@@ -291,7 +291,7 @@ class FileData(NamedTuple):
 
 
 # ================================
-def shit_to_dicts(code: str) -> tuple[dict, FileData]:
+def to_dicts(code: str) -> tuple[dict, FileData]:
     """returns dict, constants from file"""
     reset_file_data()
     res = file.parse_string(code+"\n", parse_all=True).as_dict().get("file", {})
