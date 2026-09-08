@@ -1,8 +1,10 @@
 
 from itertools import product, chain
-from typing import Callable, Iterable, Iterator
+from typing import Callable, Iterator, Literal
 
 from pydantic import BaseModel
+
+from .helpers import last, pairs_overlapping
 
 from . import lisp_objs as lo
 from .shit_errors import (
@@ -14,16 +16,36 @@ from .shit_errors import (
 from .parser_domain import FileData
 
 # ================================
-def pairs_overlapping[T](it: Iterable[T]) -> Iterator[tuple[T, T]]:
-    last = None
-    for el in it:
-        if last is not None:
-            yield last, el
-        last = el
+NodePredicate = Callable[["ShitObject", str], bool]
+PathData = tuple[str, int] # path, index in parent
+PathType = Literal["numbered", "xpath"]
+
+def path_descriptor(path: PathData, path_type: PathType) -> str:
+    if path_type == "numbered":
+        return f"{path[0]}/{path[1]}"
+    elif path_type == "xpath":
+        return f"{path[0]}[{path[1]}]"
+    else:
+        raise ValueError(f"Unknown path type: {path_type}")
+
+def subpath(
+        path_type: PathType,
+        here_descriptor: str,
+        child: "ShitObject",
+        child_index: int,
+        subtype_highest_index: dict[str, int]) -> PathData:
+    if path_type == "numbered":
+        return (here_descriptor, child_index)
+    elif path_type == "xpath":
+        child_type = type(child).__name__
+        subtype_highest_index[child_type] = subtype_highest_index.get(child_type, -1) + 1
+        child_index = subtype_highest_index[child_type]
+        return (here_descriptor + f"/{child_type}", child_index)
+    else:
+        raise ValueError(f"Unknown path type: {path_type}")
+    
 
 # ================================
-NodePredicate = Callable[["ShitObject"], bool]
-
 class ShitObject(BaseModel):
     @classmethod
     def from_dict(cls, d: dict):
@@ -45,16 +67,35 @@ class ShitObject(BaseModel):
     def traverse(
             self,
             node_filter: NodePredicate,
-            regard_children: NodePredicate = lambda x: True
-            ) -> Iterator["ShitObject"]:
+            regard_children: NodePredicate = lambda node, path: True, *,
+            path: PathData = ("/", 0),
+            path_type: PathType = "numbered"
+            ) -> Iterator[tuple["ShitObject", str]]:
         """Traverse the tree of ShitObjects, yielding all nodes that match the node_filter.\n
         if regard_children is False on a node, its children will not be traversed."""
-        if node_filter(self):
-            yield self
-        if not regard_children(self):
+        here_descriptor = path_descriptor(path, path_type)
+
+        if node_filter(self, here_descriptor):
+            yield self, here_descriptor
+        if not regard_children(self, here_descriptor):
             return
-        for child in self.children:
-            yield from child.traverse(node_filter, regard_children)
+        
+        subtype_highest_index: dict[str, int] = {}
+        for i, child in enumerate(self.children):
+            subp = subpath(path_type, here_descriptor, child, i, subtype_highest_index)
+            yield from child.traverse(node_filter, regard_children, path=subp, path_type=path_type)
+
+    def resolve_path(self, path: str) -> "ShitObject":
+        """Resolve a path to a ShitObject.\n
+        XPATH: `/type[type_index]/type[type_index]/...`\n
+        NUMBERED: `/index/index/...`"""
+        path_type = "xpath" if "[" in path else "numbered"
+        def node_filter(node, descriptor) -> bool:
+            return path.startswith(descriptor)
+        def regard_children(node, descriptor) -> bool:
+            return path.startswith(descriptor)
+        res = self.traverse(node_filter, regard_children, path=("/", 0), path_type=path_type)
+        return last(node for node, _ in res)
 
 # ================================
 class FunctionCall(ShitObject):
