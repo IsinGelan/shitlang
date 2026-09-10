@@ -1,9 +1,10 @@
 
 from itertools import product, chain
-from typing import Callable, Iterator, Literal
+from typing import Iterator
 
 from pydantic import BaseModel
 
+from .paths import NodePredicate, PathData, PathType, path_descriptor, path_type, subpath
 from .helpers import last, pairs_overlapping
 
 from . import lisp_objs as lo
@@ -15,37 +16,7 @@ from .shit_errors import (
 )
 from .parser_domain import FileData
 
-# ================================
-NodePredicate = Callable[["ShitObject", str], bool]
-PathData = tuple[str, int] # path, index in parent
-PathType = Literal["numbered", "xpath"]
-
-def path_descriptor(path: PathData, path_type: PathType) -> str:
-    if path_type == "numbered":
-        return f"{path[0]}/{path[1]}"
-    elif path_type == "xpath":
-        return f"{path[0]}[{path[1]}]"
-    else:
-        raise ValueError(f"Unknown path type: {path_type}")
-
-def subpath(
-        path_type: PathType,
-        here_descriptor: str,
-        child: "ShitObject",
-        child_index: int,
-        subtype_highest_index: dict[str, int]) -> PathData:
-    if path_type == "numbered":
-        return (here_descriptor, child_index)
-    elif path_type == "xpath":
-        child_type = type(child).__name__
-        subtype_highest_index[child_type] = subtype_highest_index.get(child_type, -1) + 1
-        child_index = subtype_highest_index[child_type]
-        return (here_descriptor + f"/{child_type}", child_index)
-    else:
-        raise ValueError(f"Unknown path type: {path_type}")
-    
-
-# ================================
+# =======================Callable, =========
 class ShitObject(BaseModel):
     @classmethod
     def from_dict(cls, d: dict):
@@ -89,12 +60,12 @@ class ShitObject(BaseModel):
         """Resolve a path to a ShitObject.\n
         XPATH: `/type[type_index]/type[type_index]/...`\n
         NUMBERED: `/index/index/...`"""
-        path_type = "xpath" if "[" in path else "numbered"
+        path_typ = path_type(path)
         def node_filter(node, descriptor) -> bool:
             return path.startswith(descriptor)
         def regard_children(node, descriptor) -> bool:
             return path.startswith(descriptor)
-        res = self.traverse(node_filter, regard_children, path=("/", 0), path_type=path_type)
+        res = self.traverse(node_filter, regard_children, path=("/", 0), path_type=path_typ)
         return last(node for node, _ in res)
 
 # ================================

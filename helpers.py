@@ -1,5 +1,5 @@
 
-from typing import Iterable, Iterator
+from typing import Callable, Iterable, Iterator
 
 # ================================
 def pairs_overlapping[T](it: Iterable[T]) -> Iterator[tuple[T, T]]:
@@ -15,3 +15,11 @@ def last[T](it: Iterable[T]) -> T | None:
         last_el = el
     return last_el
 
+def func_and[T: Callable[..., bool]](*funcs: T) -> T:
+    def combined(*args, **kwargs) -> bool:
+        return all(func(*args, **kwargs) for func in funcs)
+    return combined
+def func_or[T: Callable[..., bool]](*funcs: T) -> T:
+    def combined(*args, **kwargs) -> bool:
+        return any(func(*args, **kwargs) for func in funcs)
+    return combined
