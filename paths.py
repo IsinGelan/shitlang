@@ -1,9 +1,16 @@
 
-from typing import TYPE_CHECKING, Callable, Iterator, Literal
+from typing import TYPE_CHECKING, Callable, Iterable, Iterator, Literal, NamedTuple, Union
+
 if TYPE_CHECKING:
     from .shit_objs import ShitObject
 
+# ================================
+ChildField = Union[Iterable["ShitObject"], "ShitObject"]
+class NodeOrigin(NamedTuple):
+    parent: Union["ShitObject", None]
+    field: ChildField | None
 
+# ================================
 NodePredicate = Callable[["ShitObject", str], bool]
 PathData = tuple[str, int] # path, index in parent
 PathType = Literal["numbered", "xpath"]
@@ -76,3 +83,27 @@ def find_of_type(
     node_filter = lambda node, descriptor: isinstance(node, typ) and extra_filter(node, descriptor)
     regard_children = regard_max_depth(max_depth) if max_depth is not None else lambda node, descriptor: True
     yield from root.traverse(node_filter, regard_children, path_type="xpath")
+
+# ================================
+def replace(root: "ShitObject", path: str, new_node: "ShitObject"):
+    """Replaces the node at the given path with a new node"""
+    old_node = root.resolve_path(path)
+    origin = old_node._origin
+    if origin == (None, None):
+        raise ValueError(f"Cannot replace root node")
+    parent, field = origin
+    if isinstance(field, "ShitObject"):
+        # TEST!
+        field = new_node
+    elif isinstance(field, list):
+        index = field.index(old_node)
+        field[index] = new_node
+    elif isinstance(field, tuple):
+        index = field.index(old_node)
+        field = list(field)
+        field[index] = new_node
+        field = tuple(field)
+    else:
+        raise ValueError(f"Cannot replace node at path {path}: "
+                         "unsupported field type {type(field)}")
+    new_node._assign_origin(NodeOrigin(parent, field))

@@ -1,10 +1,10 @@
 
 from itertools import product, chain
-from typing import Iterator
+from typing import Iterable, Iterator, NamedTuple, Self, Union
 
 from pydantic import BaseModel
 
-from .paths import NodePredicate, PathData, PathType, path_descriptor, path_type, subpath
+from .paths import ChildField, NodeOrigin, NodePredicate, PathData, PathType, path_descriptor, path_type, subpath
 from .helpers import last, pairs_overlapping
 
 from . import lisp_objs as lo
@@ -16,15 +16,35 @@ from .shit_errors import (
 )
 from .parser_domain import FileData
 
-# =======================Callable, =========
+# ================================
+
 class ShitObject(BaseModel):
     @classmethod
     def from_dict(cls, d: dict):
         raise NotImplementedError
 
     @property
-    def children(self) -> Iterator["ShitObject"]:
+    def _children_fields(self) -> Iterator[ChildField]:
+        """Override to yield all fields from which to take children."""
         yield from []
+
+    @property
+    def children(self) -> Iterator["ShitObject"]:
+        for field in self._children_fields:
+            if isinstance(field, ShitObject):
+                yield field
+            elif isinstance(field, Iterable):
+                yield from field
+
+    def _assign_origin(self, node_origin: NodeOrigin):
+        self._origin = node_origin
+        for child_field in self._children_fields:
+            if isinstance(child_field, ShitObject):
+                child_field._assign_origin(NodeOrigin(self, child_field))
+            elif isinstance(child_field, Iterable):
+                for child in child_field:
+                    assert isinstance(child, ShitObject)
+                    child._assign_origin(NodeOrigin(self, child_field))
 
     def to_lisp_objs(self) -> Iterator[lo.LispObject]:
         raise NotImplementedError
@@ -68,6 +88,21 @@ class ShitObject(BaseModel):
         res = self.traverse(node_filter, regard_children, path=("/", 0), path_type=path_typ)
         return last(node for node, _ in res)
 
+    def __eq__(self, other) -> bool:
+        if not isinstance(other, type(self)):
+            return False
+        # only compare public fields (not starting with "_")
+        return {
+            key: value
+            for key, value in self.__dict__.items()
+            if not key.startswith("_")
+        } == {
+            key: value
+            for key, value in other.__dict__.items()
+            if not key.startswith("_")
+        }
+
+
 # ================================
 class FunctionCall(ShitObject):
     """for state-variable like expressions, e.g. inv_num(dirt) -> int"""
@@ -82,8 +117,8 @@ class FunctionCall(ShitObject):
         )
 
     @property
-    def children(self) -> Iterator["ShitObject"]:
-        yield from self.args
+    def _children_fields(self):
+        yield self.args
     
     def to_lisp_objs(self):
         # TODO: differentiate vars from consts
@@ -131,7 +166,7 @@ class ComparisonExpr(LogicalExpr):
         )
 
     @property
-    def children(self) -> Iterator["ShitObject"]:
+    def _children_fields(self):
         yield self.left
         yield self.right
     
@@ -155,8 +190,8 @@ class FactExpr(LogicalExpr):
         )
 
     @property
-    def children(self) -> Iterator["ShitObject"]:
-        yield from self.args
+    def _children_fields(self):
+        yield self.args
 
     def to_lisp_objs(self):
         # TODO: differentiate vars from consts
@@ -183,8 +218,8 @@ class TaskCall(ShitObject):
         )
 
     @property
-    def children(self) -> Iterator["ShitObject"]:
-        yield from self.args
+    def _children_fields(self):
+        yield self.args
 
     def to_lisp_objs(self):
         # TODO: differentiate vars from consts
@@ -218,8 +253,8 @@ class SubtasksWithOrdering(Subtasks):
         )
 
     @property
-    def children(self) -> Iterator["ShitObject"]:
-        yield from self.subtasks.values()
+    def _children_fields(self):
+        yield self.subtasks
     
     def all_relationships(self) -> Iterator[tuple[int, int]]:
         for ordering_groups in self.orderings:
@@ -266,8 +301,8 @@ class SequencedSubtasks(Subtasks):
         )
 
     @property
-    def children(self) -> Iterator["ShitObject"]:
-        yield from self.subtasks
+    def _children_fields(self):
+        yield self.subtasks
 
     def to_lisp_objs(self):
         val_lisp = lo.HeadArgsIndented("and", [t.to_lisp_obj() for t in self.subtasks]
@@ -344,9 +379,9 @@ class Method(TopLevel):
         )
 
     @property
-    def children(self) -> Iterator["ShitObject"]:
-        yield from self.params
-        yield from self.precondition
+    def _children_fields(self):
+        yield self.params
+        yield self.precondition
         yield self.subtasks
 
     def _set_task_params(self, task_params: list[Param]):
@@ -398,10 +433,10 @@ class Action(TopLevel):
         )
 
     @property
-    def children(self) -> Iterator["ShitObject"]:
-        yield from self.params
-        yield from self.precondition
-        yield from self.postcondition
+    def _children_fields(self):
+        yield self.params
+        yield self.precondition
+        yield self.postcondition
     
     def to_lisp_objs(self):
         params = lo.ListInline([p.to_lisp_obj() for p in self.params])
@@ -489,8 +524,8 @@ class ShitPredicate(ShitObject):
         )
 
     @property
-    def children(self) -> Iterator["ShitObject"]:
-        yield from self.params
+    def _children_fields(self):
+        yield self.params
     
     def to_lisp_objs(self):
         yield lo.HeadArgsInline(
@@ -557,13 +592,14 @@ class DomainFile(ShitObject):
         self.validate_methods()
         self.validate_task_methods()
         self.set_method_task_params()
+        self._assign_origin(NodeOrigin(None, None))
 
     @property
-    def children(self) -> Iterator["ShitObject"]:
-        yield from self.declared_types
-        yield from self.declared_constants
-        yield from self.declared_predicates
-        yield from self.top_level_elements
+    def _children_fields(self):
+        yield self.declared_types
+        yield self.declared_constants
+        yield self.declared_predicates
+        yield self.top_level_elements
 
     def analyze_requirements(self) -> Iterator[str]:
         # TODO: analyze the structure to find the actual requirements
@@ -684,6 +720,9 @@ class ProblemFile(ShitObject):
             obj_declarations=obj_decls,
             fact_declarations=fact_decls
         )
+
+    def model_post_init(self, context):
+        self._assign_origin(NodeOrigin(None, None))
 
     def to_lisp_objs(self):
         yield lo.HeadArgsFirstChildInline(
