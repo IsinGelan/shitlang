@@ -1,4 +1,5 @@
 
+from os import path
 from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, Literal
 if TYPE_CHECKING:
     from .shit_objs import ShitObject
@@ -16,6 +17,17 @@ def last[T](it: Iterable[T]) -> T | None:
     for el in it:
         last_el = el
     return last_el
+
+def split[T](it: Iterable[T], predicate: Callable[[T], bool]) -> tuple[list[T], list[T]]:
+    """Splits an iterable into two lists based on a predicate."""
+    true_list = []
+    false_list = []
+    for el in it:
+        if predicate(el):
+            true_list.append(el)
+        else:
+            false_list.append(el)
+    return true_list, false_list
 
 # ================================
 def func_and[T: Callable[..., bool]](*funcs: T) -> T:
@@ -46,3 +58,7 @@ def multi_insert(l: list, *insertions: Insertion) -> None:
         insertion_index = insertions_done + ref_node_ind + (1 if ref_node_ind == "after" else 0)
         l.insert(insertion_index, new_node)
         insertions_done += 1
+
+# ================================
+def dir_here(where: str = __file__) -> str:
+    return path.dirname(path.realpath(where))

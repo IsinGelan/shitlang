@@ -1,0 +1,41 @@
+
+:- use_module(library(lists)).
+
+:- dynamic do_tracking/0.
+no_track :- retract(do_tracking()).
+track :- assertz(do_tracking()).
+do_tracking.
+
+start_tracking :-
+    nb_setval(used_facts, []),
+    assertz(do_tracking).
+
+record_fact(Fact) :-
+    do_tracking,
+    nb_getval(used_facts, Facts0),
+    (   memberchk(Fact, Facts0)
+    ->  Facts = Facts0
+    ;   Facts = [Fact|Facts0]
+    ),
+    nb_setval(used_facts, Facts).
+
+used_facts(Facts) :-
+    nb_getval(used_facts, Facts).
+
+print_used_facts :-
+    used_facts(Facts),
+    forall(member(Fact, Facts), writeln(Fact)).
+
+tracked(Fact) :-
+    call(Fact),
+    record_fact(Fact).
+
+untracked(Call) :-
+    no_track,
+    call(Call),
+    track.
+
+% ...
+track_name(Name) :-
+    atom(Name),
+    record_fact(atom(Name)).

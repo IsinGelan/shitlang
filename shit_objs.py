@@ -231,6 +231,9 @@ class TaskCall(ShitObject):
 class Subtasks(ShitObject):
     pass
 
+    def __iter__(self):
+        ... 
+
 class SubtasksWithOrdering(Subtasks):
     subtasks: dict[int, TaskCall]
     orderings: list[list[set[int]]]
@@ -255,6 +258,9 @@ class SubtasksWithOrdering(Subtasks):
     @property
     def _children_fields(self):
         yield self.subtasks
+
+    def __iter__(self):
+        return iter(self.subtasks.values())
     
     def all_relationships(self) -> Iterator[tuple[int, int]]:
         for ordering_groups in self.orderings:
@@ -303,6 +309,9 @@ class SequencedSubtasks(Subtasks):
     @property
     def _children_fields(self):
         yield self.subtasks
+
+    def __iter__(self):
+        return iter(self.subtasks)
 
     def to_lisp_objs(self):
         val_lisp = lo.HeadArgsIndented("and", [t.to_lisp_obj() for t in self.subtasks]
