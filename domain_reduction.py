@@ -1,12 +1,21 @@
 
 
 from itertools import chain
+import subprocess
 from typing import Iterator
 
-from .shit_objs import Action, ComparisonExpr, DomainFile, FactExpr, IdentifierConst, IdentifierParam, Param, ShitObjects, Task, TaskCall, ValuedExpr, Method
+from .shit_objs import Action, ComparisonExpr, DomainFile, FactExpr, IdentifierConst, IdentifierParam, Param, ProblemFile, ShitObjects, Task, TaskCall, ValuedExpr, Method
 from .helpers import dir_here, split
 
 HEADER_PATH = dir_here() + "/dom_red_header.pro"
+
+STD_PROLOG_EXPORT = "domain.pro"
+STD_FACTS_FILE = "domain_facts.pro"
+
+SUCCESS_INDICATOR = "SUCCESS"
+FAILURE_INDICATOR = "FAILURE"
+
+FAILURE_FACTS = ({}, {"FAILURE"})
 
 # ================================
 def fact_in_effect(fact: FactExpr) -> bool:
@@ -168,32 +177,106 @@ def domain_to_prolog(domain: DomainFile, static_preds: set[str], domain_fact_fil
     top_level_signatures = {
         f"{executable_name(tl)}/{len(tl.params)}"
         for tl in domain.top_level_elements
-        if isinstance(tl, (Action, Method))}
+        if isinstance(tl, (Action, Task))}
     tabling_methods = "\n".join(
         f":- table({signature})."
         for signature in top_level_signatures)
     obj_type_defs = "\n".join(chain.from_iterable(
         prolog_type_def(cons) for cons in domain.declared_constants))
+    type_discontiguous_suppression = "\n".join(
+        f":- discontiguous({type_pred_name(name)}/1)."
+        for ty in domain.declared_types for name in ty.names)
     base_type_defs = "\n".join(f"type{name}(_) :- false." for ty in domain.declared_types for name in ty.names)
     executable_str = "\n\n".join(top_level_prolog_strs(domain, static_preds))
     return (
         fact_import + "\n\n"
         + header + "\n\n"
         + tabling_methods + "\n\n"
+        + type_discontiguous_suppression + "\n\n"
         + obj_type_defs + "\n\n"
         + base_type_defs + "\n\n"
         + executable_str)
 
 def write_domain_to_prolog_file(
         domain: DomainFile,
-        filename: str, *,
-        domain_fact_filename: str = "domain_facts.pro",
+        filename: str = STD_PROLOG_EXPORT, *,
+        domain_fact_filename: str = STD_FACTS_FILE,
         static_preds: set[str] = None,
         ignore_preds: set[str] = set()) -> None:
     """Writes the Prolog representation of a DomainFile to a file."""
+    print(f">> Writing domain {domain.domain_name!r} to Prolog file: {filename}")
     if static_preds is None:
         static_preds = domain_static_preds(domain)
     static_preds -= ignore_preds
     prolog_str = domain_to_prolog(domain, static_preds, domain_fact_filename)
     with open(filename, "w") as f:
         f.write(prolog_str)
+
+# ================================
+# get required facts for a goal call (from computation)
+def prolog_output_types_and_facts(prolog_output: str) -> tuple[dict[str, str], set[FactExpr]]:
+    """returns {obj_name -> type} and set of facts"""
+    result_indicator_pos = max(prolog_output.rfind(SUCCESS_INDICATOR), prolog_output.rfind(FAILURE_INDICATOR))
+    if result_indicator_pos == -1:
+        print(f"   Output of unexpected format (Expected {SUCCESS_INDICATOR} or {FAILURE_INDICATOR})")
+        return FAILURE_FACTS
+    if prolog_output[result_indicator_pos:].startswith(FAILURE_INDICATOR):
+        print(f"   Prolog did not find valid domain execution. Output:\n{prolog_output}")
+        return FAILURE_FACTS
+    fact_start_pos = prolog_output.find("\n", result_indicator_pos) + 1
+    fact_lines = prolog_output[fact_start_pos:].strip().splitlines()
+    facts: set[FactExpr] = set()
+    type_decls: dict[str, str] = {}
+    for line in fact_lines:
+        fact = FactExpr.from_str(line)
+        if fact.predicate_name.startswith("type"):
+            typename = fact.predicate_name[4:]
+            obj: IdentifierConst = fact.args[0]
+            type_decls[obj.name] = typename
+        else:
+            facts.add(fact)
+    return type_decls, facts
+
+def get_required_facts(goal_call: TaskCall, filename: str = STD_PROLOG_EXPORT)  -> tuple[dict[str, str], set[FactExpr]]:
+    """Returns the facts needed for the given goal call."""
+    print(f">> Running Prolog file {filename!r} to get required predicates for {goal_call!r}")
+    goal_call_str = prolog_executable_call(goal_call)
+    command = f"swipl -q -g \"" \
+        f"consult('{filename}'), start_tracking," \
+        f"({goal_call_str} -> writeln('{SUCCESS_INDICATOR}'); writeln('{FAILURE_INDICATOR}'))," \
+        "print_used_facts.\" -t halt"
+    try: 
+        prolog_process = subprocess.run(
+            command,
+            capture_output=True,
+            check=True,
+            text=True,
+            shell=True
+        )
+        return prolog_output_types_and_facts(prolog_process.stdout)
+    except subprocess.CalledProcessError as e:
+        print("Error executing Prolog command:", e)
+        return FAILURE_FACTS
+
+def optimize_domain(
+        domain: DomainFile,
+        problem: ProblemFile, *, 
+        recompile_domain: bool = True) -> None:
+    """Optimizes the domain by removing unused predicates based on the goal call."""
+    print(f">> Optimizing domain {domain.domain_name!r} based on problem {problem.problem_name!r}")
+    if recompile_domain:
+        write_domain_to_prolog_file(domain)
+    res = (req_objs, req_facts) = get_required_facts(problem.goal)
+    if res == FAILURE_FACTS:
+        print("  Domain optimization failed. Keeping original domain.")
+        return
+    print(f"   BEFORE:")
+    print(f"   dom.consts: {domain.nr_consts:>4} | dom.facts: {problem.nr_facts:>4}")
+    problem.fact_declarations = [fact for fact in problem.fact_declarations if fact in req_facts]
+    domain.declared_constants = [
+        ShitObjects(
+            names=[name for name in cons.names if name in req_objs],
+            type=cons.type)
+        for cons in domain.declared_constants]
+    print(f"   AFTER:")
+    print(f"   dom.consts: {domain.nr_consts:>4} | dom.facts: {problem.nr_facts:>4}")

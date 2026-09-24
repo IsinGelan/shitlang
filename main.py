@@ -114,7 +114,7 @@ def transpile_problem_str(
 def transpile_problem(
         filename: str,
         macro_funs: list[CodeMacro] = [],
-        show_macro_result: bool = False) -> DomainFile:
+        show_macro_result: bool = False) -> ProblemFile:
     with open(filename, "r", encoding="utf-8") as file:
         code = file.read()
     return transpile_problem_str(

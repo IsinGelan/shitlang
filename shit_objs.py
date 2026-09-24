@@ -132,12 +132,16 @@ class IdentifierConst(ShitObject):
     
     def to_lisp_objs(self):
         yield lo.Name(self.name)
+    def __str__(self):
+        return self.name
 
 class IdentifierParam(ShitObject):
     name: str
     
     def to_lisp_objs(self):
         yield lo.Name(f"?{self.name}")
+    def __str__(self):
+        return f"?{self.name}"
 
 class Value(ShitObject):
     value: str | int
@@ -188,6 +192,22 @@ class FactExpr(LogicalExpr):
             predicate_name=d["name"],
             args=[dict_to_valued_expr(arg) for arg in d["args"]]
         )
+    @classmethod
+    def from_str(cls, s):
+        """Parse a fact expression from a string of the form:\n
+        `predicate_name(arg1, arg2, ...)`"""
+        s = s.strip()
+        predicate_name, args_str = s.split("(", 1)
+        args_str = args_str[:-1]  # remove closing parenthesis
+        args = [IdentifierConst(name=arg.strip()) for arg in args_str.split(",") if arg.strip()]
+        return cls(
+            negated=False,
+            predicate_name=predicate_name.strip(),
+            args=args
+        )
+    def __hash__(self):
+        arg_names = tuple(str(arg) for arg in self.args)
+        return hash((self.negated, self.predicate_name, arg_names))
 
     @property
     def _children_fields(self):
@@ -227,6 +247,9 @@ class TaskCall(ShitObject):
             self.task_name,
             [arg.to_lisp_obj() for arg in self.args]
         )
+
+    def __str__(self):
+        return f"{self.task_name}({', '.join(str(arg) for arg in self.args)})"
 
 class Subtasks(ShitObject):
     pass
@@ -676,6 +699,13 @@ class DomainFile(ShitObject):
                 continue
             task_params = self._tasks_signatures[elem.task_name]
             elem._set_task_params(task_params)
+
+    @property
+    def nr_types(self) -> int:
+        return len(self.declared_types)
+    @property
+    def nr_consts(self) -> int:
+        return sum(len(c.names) for c in self.declared_constants)
     
     def to_lisp_objs(self):
         yield lo.HeadArgsFirstChildInline(
@@ -732,6 +762,10 @@ class ProblemFile(ShitObject):
 
     def model_post_init(self, context):
         self._assign_origin(NodeOrigin(None, None))
+
+    @property
+    def nr_facts(self) -> int:
+        return len(self.fact_declarations)
 
     def to_lisp_objs(self):
         yield lo.HeadArgsFirstChildInline(
