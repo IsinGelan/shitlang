@@ -4,8 +4,21 @@ from itertools import chain
 import subprocess
 from typing import Iterator
 
-from .shit_objs import Action, ComparisonExpr, DomainFile, FactExpr, IdentifierConst, IdentifierParam, Param, ProblemFile, ShitObjects, Task, TaskCall, ValuedExpr, Method
-from .helpers import dir_here, split
+from .shit_objs import (
+    Action,
+    ComparisonExpr,
+    DomainFile,
+    FactExpr,
+    IdentifierConst,
+    IdentifierParam,
+    Param,
+    ProblemFile,
+    ShitObjects,
+    Task,
+    TaskCall,
+    ValuedExpr,
+    Method)
+from .helpers import dir_here, split, find
 
 HEADER_PATH = dir_here() + "/dom_red_header.pro"
 
@@ -15,7 +28,7 @@ STD_FACTS_FILE = "domain_facts.pro"
 SUCCESS_INDICATOR = "SUCCESS"
 FAILURE_INDICATOR = "FAILURE"
 
-FAILURE_FACTS = ({}, {"FAILURE"})
+FAILURE_ELEMENTS = (set(), {"FAILURE"}, set())
 
 # ================================
 def fact_in_effect(fact: FactExpr) -> bool:
@@ -35,11 +48,21 @@ def domain_static_preds(domain: DomainFile) -> set[str]:
     return all_preds - {fact.predicate_name for fact in effect_facts}
 
 # ================================
-def executable_name(ex: Action | Method) -> str:
+def executable_code_name(ex: Action | Method | Task) -> str:
+    """Name of the executable in the prolog code"""
     if isinstance(ex, Action):
         return ex.action_name.replace("-", "_")
-    if isinstance(ex, (Method, Task)):
+    if isinstance(ex, (Task, Method)):
         return ex.task_name.replace("-", "_")
+
+def executable_repr_name(ex: Action | Method | Task) -> str:
+    """Name representing the executable, differentiates between methods and tasks"""
+    if isinstance(ex, Action):
+        return ex.action_name.replace("-", "_")
+    if isinstance(ex, Task):
+        return ex.task_name.replace("-", "_")
+    if isinstance(ex, Method):
+        return ex.full_name.replace("-", "_")
 
 def type_pred_name(type_name: str) -> str:
     return "type" + type_name
@@ -71,23 +94,28 @@ def prolog_type_def(cons: ShitObjects) -> Iterator[str]:
     for name in cons.names:
         yield f"type{cons.type}({name})."
 
+def necessary_consts_for_executable(ex: Action | Method) -> set[str]:
+    """Returns the names of all constants in the executable."""
+    res = ex.traverse(lambda node, path: isinstance(node, IdentifierConst))
+    return {const.name for const, _ in res}
+
 
 def action_to_prolog(action: Action, static_preds: set[str]) -> str:
     """Converts an Action object to a Prolog representation."""
-    name_str = f"{executable_name(action)}{prolog_args(action.params)} :-\n"
+    name_str = f"{executable_code_name(action)}{prolog_args(action.params)} :-\n"
     
     return executable_body_prolog(
-        name_str, action.params,
+        action, name_str, action.params,
         action.precondition, static_preds)
 
 def method_to_prolog(method: Method, static_preds: set[str]) -> str:
     """Converts a Method object to a Prolog representation."""
-    name_str = f"method_{executable_name(method)}{prolog_args(method._task_params)} :-\n"
+    name_str = f"method_{executable_code_name(method)}{prolog_args(method._task_params)} :-\n"
     return executable_body_prolog(
-        name_str, method.params,
+        method, name_str, method.params,
         method.precondition, static_preds, method.subtasks)
 
-def executable_body_prolog(name_str, params, precondition, static_preds, subtasks=[]) -> str:
+def executable_body_prolog(obj, name_str, params, precondition, static_preds, subtasks=[]) -> str:
     type_checks = [
         f"{type_pred_name(param.type)}({prolog_variable(param)})"
         for param in params]
@@ -97,6 +125,8 @@ def executable_body_prolog(name_str, params, precondition, static_preds, subtask
     comp_exprs = [
         prec for prec in precondition
         if isinstance(prec, ComparisonExpr)]
+    # Consts need to be defined even if they appear in ignored predicates
+    necessary_consts = necessary_consts_for_executable(obj)
     
     subtasks_str = "".join(f"  {prolog_executable_call(subtask)},\n" for subtask in subtasks)
 
@@ -116,45 +146,49 @@ def executable_body_prolog(name_str, params, precondition, static_preds, subtask
         f"  -> tracked({prolog_fact(fact)}), fail\n"
         "  ;  true),\n"
         for fact in neg_precs) # TODO: do not track subtasks
-
     # EXECUTABLE
     # EXECUTABLE WITH SUBTASKS
     # If action is executable record positive precondition facts
     pos_prec_tracks = "".join(f"  tracked({prolog_fact(fact)}),\n" for fact in pos_precs)
+    # comp_consts = [side for expr in comp_exprs for side in expr.children if isinstance(side, IdentifierConst)]
+    # comp_consts_tracks = "".join(f"  tracked_name({side.name}),\n" for side in comp_consts)
+    consts_tracks = "".join(
+        f"  tracked_name({const}),\n"
+        for const in necessary_consts)
     type_tracks_str = "".join(f"  tracked({check}),\n" for check in type_checks)
-    nam = name_str.removesuffix(") :-\n")
-    pred_name, args = nam.split("(")
-    args = args.split(", ")
-    if args == [""]: args = []
-    astring = ", ".join(f"~a" for _ in args)
-    debug_name_call = f"  format(string(Debug), '{pred_name}({astring})', [{', '.join(args)}]),\n"
+    executable_track = f"  tracked_executable({executable_repr_name(obj)}),\n"
+    # nam = name_str.removesuffix(") :-\n")
+    # pred_name, args = nam.split("(")
+    # args = args.split(", ")
+    # if args == [""]: args = []
+    # astring = ", ".join(f"~a" for _ in args)
+    # debug_name_call = f"  format(string(Debug), '{pred_name}({astring})', [{', '.join(args)}]),\n"
     body = (
-        debug_name_call
-        + f"  format('Calling ~a~n', [Debug]),\n"
+        "" # debug_name_call
+        #+ f"  format('Calling ~a~n', [Debug]),\n"
         + type_checks_str
         + comp_exprs_str
         + pos_prec_checks
         + neg_prec_checks
-        + f"  format('Subtasks for ~a~n', [Debug]),\n"
+        #+ f"  format('Subtasks for ~a~n', [Debug]),\n"
         + subtasks_str
-        + f"  format('APPLICABLE   ~a~n', [Debug]),\n"
+        #+ f"  format('APPLICABLE   ~a~n', [Debug]),\n"
+        + consts_tracks
         + pos_prec_tracks
         + type_tracks_str
+        + executable_track
         ) or "  true"
     body = body.removesuffix(",\n") + "."
     return name_str + body
 
 def task_to_prolog(task: Task) -> str:
-    sig = f"{executable_name(task)}{prolog_args(task.params)}"
+    sig = f"{executable_code_name(task)}{prolog_args(task.params)}"
     header = f"{sig} :-\n"
     # check all method implementations to get all paths explored
     check = f"  findall(true, method_{sig}, Results),\n"
     # succeed if at least one method implementation is applicable
     ret = "  Results \\= []."
     return header + check + ret
-
-# - type checks for objects
-# - subcalls for methods
 
 def top_level_prolog_strs(domain: DomainFile, static_preds: set[str]) -> Iterator[str]:
     """Yields Prolog strings for top-level elements of the domain."""
@@ -170,12 +204,12 @@ def prolog_header() -> str:
     with open(HEADER_PATH) as f:
         return f.read()
 
-def domain_to_prolog(domain: DomainFile, static_preds: set[str], domain_fact_filename: str) -> str:
+def domain_to_prolog(domain: DomainFile, static_preds: set[str], domain_fact_filename: str, false_preds: set[str]) -> str:
     """Converts a DomainFile object to a Prolog representation."""
     fact_import = f":- ensure_loaded('{domain_fact_filename}')."
     header = prolog_header()
     top_level_signatures = {
-        f"{executable_name(tl)}/{len(tl.params)}"
+        f"{executable_code_name(tl)}/{len(tl.params)}"
         for tl in domain.top_level_elements
         if isinstance(tl, (Action, Task))}
     tabling_methods = "\n".join(
@@ -187,6 +221,13 @@ def domain_to_prolog(domain: DomainFile, static_preds: set[str], domain_fact_fil
         f":- discontiguous({type_pred_name(name)}/1)."
         for ty in domain.declared_types for name in ty.names)
     base_type_defs = "\n".join(f"type{name}(_) :- false." for ty in domain.declared_types for name in ty.names)
+    false_pred_signatures = {
+        (pred, decl.arity)
+        for pred in false_preds
+        if (decl := find(domain.declared_predicates, lambda p: p.name == pred))}
+    false_preds_definitions = "\n".join(
+        f"{pred}({', '.join(['_'] * arity)}) :- false."
+        for pred, arity in false_pred_signatures)
     executable_str = "\n\n".join(top_level_prolog_strs(domain, static_preds))
     return (
         fact_import + "\n\n"
@@ -195,6 +236,7 @@ def domain_to_prolog(domain: DomainFile, static_preds: set[str], domain_fact_fil
         + type_discontiguous_suppression + "\n\n"
         + obj_type_defs + "\n\n"
         + base_type_defs + "\n\n"
+        + false_preds_definitions + "\n\n"
         + executable_str)
 
 def write_domain_to_prolog_file(
@@ -202,42 +244,53 @@ def write_domain_to_prolog_file(
         filename: str = STD_PROLOG_EXPORT, *,
         domain_fact_filename: str = STD_FACTS_FILE,
         static_preds: set[str] = None,
-        ignore_preds: set[str] = set()) -> None:
-    """Writes the Prolog representation of a DomainFile to a file."""
+        false_preds: set[str] = set()) -> None:
+    """Writes the Prolog representation of a DomainFile to a file.\n
+    `false_preds`: predicates that are assumed to be false (e.g. if not found in facts)"""
     print(f">> Writing domain {domain.domain_name!r} to Prolog file: {filename}")
     if static_preds is None:
         static_preds = domain_static_preds(domain)
-    static_preds -= ignore_preds
-    prolog_str = domain_to_prolog(domain, static_preds, domain_fact_filename)
+    prolog_str = domain_to_prolog(domain, static_preds, domain_fact_filename, false_preds)
     with open(filename, "w") as f:
         f.write(prolog_str)
 
 # ================================
 # get required facts for a goal call (from computation)
-def prolog_output_types_and_facts(prolog_output: str) -> tuple[dict[str, str], set[FactExpr]]:
-    """returns {obj_name -> type} and set of facts"""
+def prolog_output_elements(prolog_output: str) -> tuple[set[str], set[FactExpr], set[str]]:
+    """returns {obj_names}, {facts}, {executable_names}"""
     result_indicator_pos = max(prolog_output.rfind(SUCCESS_INDICATOR), prolog_output.rfind(FAILURE_INDICATOR))
     if result_indicator_pos == -1:
         print(f"   Output of unexpected format (Expected {SUCCESS_INDICATOR} or {FAILURE_INDICATOR})")
-        return FAILURE_FACTS
+        return FAILURE_ELEMENTS
     if prolog_output[result_indicator_pos:].startswith(FAILURE_INDICATOR):
         print(f"   Prolog did not find valid domain execution. Output:\n{prolog_output}")
-        return FAILURE_FACTS
+        return FAILURE_ELEMENTS
     fact_start_pos = prolog_output.find("\n", result_indicator_pos) + 1
     fact_lines = prolog_output[fact_start_pos:].strip().splitlines()
     facts: set[FactExpr] = set()
-    type_decls: dict[str, str] = {}
+    objs: set[str] = set()
+    executables: set[str] = set()
     for line in fact_lines:
+        print("F", line)
         fact = FactExpr.from_str(line)
         if fact.predicate_name.startswith("type"):
-            typename = fact.predicate_name[4:]
             obj: IdentifierConst = fact.args[0]
-            type_decls[obj.name] = typename
+            objs.add(obj.name)
+        elif fact.predicate_name == "atom":
+            obj: IdentifierConst = fact.args[0]
+            objs.add(obj.name)
+        elif fact.predicate_name == "executable":
+            ex_name: IdentifierConst = fact.args[0]
+            executables.add(ex_name.name)
+            if "_M_" in ex_name.name:
+                # method executable, also add task name
+                task_name = ex_name.name.split("_M_")[0]
+                executables.add(task_name)
         else:
             facts.add(fact)
-    return type_decls, facts
+    return objs, facts, executables
 
-def get_required_facts(goal_call: TaskCall, filename: str = STD_PROLOG_EXPORT)  -> tuple[dict[str, str], set[FactExpr]]:
+def get_required_facts(goal_call: TaskCall, filename: str = STD_PROLOG_EXPORT)  -> tuple[set[str], set[FactExpr]]:
     """Returns the facts needed for the given goal call."""
     print(f">> Running Prolog file {filename!r} to get required predicates for {goal_call!r}")
     goal_call_str = prolog_executable_call(goal_call)
@@ -253,30 +306,36 @@ def get_required_facts(goal_call: TaskCall, filename: str = STD_PROLOG_EXPORT)  
             text=True,
             shell=True
         )
-        return prolog_output_types_and_facts(prolog_process.stdout)
+        return prolog_output_elements(prolog_process.stdout)
     except subprocess.CalledProcessError as e:
         print("Error executing Prolog command:", e)
-        return FAILURE_FACTS
+        return FAILURE_ELEMENTS
 
 def optimize_domain(
         domain: DomainFile,
         problem: ProblemFile, *, 
-        recompile_domain: bool = True) -> None:
+        recompile_domain: bool = True,
+        false_preds: set[str] = set()) -> None:
     """Optimizes the domain by removing unused predicates based on the goal call."""
     print(f">> Optimizing domain {domain.domain_name!r} based on problem {problem.problem_name!r}")
     if recompile_domain:
-        write_domain_to_prolog_file(domain)
-    res = (req_objs, req_facts) = get_required_facts(problem.goal)
-    if res == FAILURE_FACTS:
+        write_domain_to_prolog_file(domain, false_preds=false_preds)
+    res = (req_objs, req_facts, req_execs) = get_required_facts(problem.goal)
+    if res == FAILURE_ELEMENTS:
         print("  Domain optimization failed. Keeping original domain.")
         return
     print(f"   BEFORE:")
-    print(f"   dom.consts: {domain.nr_consts:>4} | dom.facts: {problem.nr_facts:>4}")
+    print(f"   dom.consts: {domain.nr_consts:>4} | dom.facts: {problem.nr_facts:>4} | "
+          f"dom.execs: {len(domain.top_level_elements):>4}")
     problem.fact_declarations = [fact for fact in problem.fact_declarations if fact in req_facts]
     domain.declared_constants = [
         ShitObjects(
             names=[name for name in cons.names if name in req_objs],
             type=cons.type)
         for cons in domain.declared_constants]
+    domain.top_level_elements = [
+        tl for tl in domain.top_level_elements
+        if (isinstance(tl, (Action, Task, Method)) and executable_repr_name(tl) in req_execs)]
     print(f"   AFTER:")
-    print(f"   dom.consts: {domain.nr_consts:>4} | dom.facts: {problem.nr_facts:>4}")
+    print(f"   dom.consts: {domain.nr_consts:>4} | dom.facts: {problem.nr_facts:>4} | "
+          f"dom.execs: {len(domain.top_level_elements):>4}")

@@ -1,10 +1,16 @@
 
 from os import path
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, Literal
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, Literal, Optional
 if TYPE_CHECKING:
     from .shit_objs import ShitObject
 
 # ================================
+def find[T](iter: Iterable[T], pred: Callable[[T], bool]) -> Optional[T]:
+    for item in iter:
+        if pred(item):
+            return item
+    return None
+
 def pairs_overlapping[T](it: Iterable[T]) -> Iterator[tuple[T, T]]:
     last = None
     for el in it:

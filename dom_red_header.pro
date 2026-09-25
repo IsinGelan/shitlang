@@ -6,6 +6,8 @@ no_track :- retract(do_tracking()).
 track :- assertz(do_tracking()).
 do_tracking.
 
+:- dynamic executable/1.
+
 start_tracking :-
     nb_setval(used_facts, []),
     assertz(do_tracking).
@@ -36,6 +38,10 @@ untracked(Call) :-
     track.
 
 % ...
-track_name(Name) :-
+tracked_name(Name) :-
     atom(Name),
     record_fact(atom(Name)).
+
+tracked_executable(Name) :-
+    assertz(executable(Name)),
+    record_fact(executable(Name)).

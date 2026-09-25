@@ -431,7 +431,7 @@ class Method(TopLevel):
         ]
 
         children = [
-            lo.Name(self.full_name()),
+            lo.Name(self.full_name),
             lo.KeyVal(":parameters", m_params),
             lo.KeyVal(":task", [lo.Name(self.task_name)] + t_params),
             *prec,
@@ -444,6 +444,7 @@ class Method(TopLevel):
         Does not validate whether it really is the only method or just has the name"""
         return self.method_name == ""
 
+    @property
     def full_name(self) -> str:
         if self.is_only_task_method():
             return f"{self.task_name}-M"
@@ -556,6 +557,10 @@ class ShitPredicate(ShitObject):
         )
 
     @property
+    def arity(self) -> int:
+        return len(self.params)
+
+    @property
     def _children_fields(self):
         yield self.params
     
@@ -664,13 +669,13 @@ class DomainFile(ShitObject):
             if elem.task_name not in self._tasks_signatures:
                 print(self._tasks_signatures)
                 raise ValueError(f"Must define task '{elem.task_name}'! "
-                                 f"(For method '{elem.full_name()}')")
+                                 f"(For method '{elem.full_name}')")
 
             task_params = self._tasks_signatures[elem.task_name]
             m_params = {p.name for p in elem.params}
             t_params = {p.name for p in task_params}
             if not t_params.issubset(m_params):
-                raise ValueError(f"Parameters of method '{elem.full_name()}' {elem.params} "
+                raise ValueError(f"Parameters of method '{elem.full_name}' {elem.params} "
                                  "must be a superset of "
                                  f"its task's parameters {task_params}!")
 
