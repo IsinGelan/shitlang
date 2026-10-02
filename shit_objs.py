@@ -2,7 +2,7 @@
 from itertools import product, chain
 from typing import Iterable, Iterator, NamedTuple, Self, Union
 
-from pydantic import BaseModel
+from pydantic import BaseModel, PrivateAttr
 
 from .paths import ChildField, NodeOrigin, NodePredicate, PathData, PathType, path_descriptor, path_type, subpath
 from .helpers import last, pairs_overlapping
@@ -19,6 +19,8 @@ from .parser_domain import FileData
 # ================================
 
 class ShitObject(BaseModel):
+    _origin: NodeOrigin | None = PrivateAttr(default=NodeOrigin(None, None))
+
     @classmethod
     def from_dict(cls, d: dict):
         raise NotImplementedError
@@ -127,21 +129,28 @@ class FunctionCall(ShitObject):
             [arg.to_lisp_obj() for arg in self.args]
             )
 
-class IdentifierConst(ShitObject):
+class Identifier(ShitObject):
+    name: str
+
+class IdentifierConst(Identifier):
     name: str
     
     def to_lisp_objs(self):
         yield lo.Name(self.name)
     def __str__(self):
         return self.name
+    def __hash__(self):
+        return hash(str(self))
 
-class IdentifierParam(ShitObject):
+class IdentifierParam(Identifier):
     name: str
     
     def to_lisp_objs(self):
         yield lo.Name(f"?{self.name}")
     def __str__(self):
         return f"?{self.name}"
+    def __hash__(self):
+        return hash(str(self))
 
 class Value(ShitObject):
     value: str | int
@@ -391,6 +400,8 @@ class Task(TopLevel):
                 lo.KeyVal(":parameters", params)
             ]
         )
+    def __hash__(self):
+        return hash(self.task_name)
 
 class Method(TopLevel):
     task_name: str
@@ -449,6 +460,14 @@ class Method(TopLevel):
         if self.is_only_task_method():
             return f"{self.task_name}-M"
         return f"{self.task_name}-M-{self.method_name}"
+    @property
+    def call_name(self) -> str:
+        return self.task_name
+    @property
+    def impl_name(self) -> str:
+        return self.full_name
+    def __hash__(self):
+        return hash(self.full_name)
 
 class Action(TopLevel):
     action_name: str
@@ -492,6 +511,15 @@ class Action(TopLevel):
             *postc
         ]
         yield lo.HeadArgsFirstChildInline(":action", children)
+
+    @property
+    def call_name(self) -> str:
+        return self.action_name
+    @property
+    def impl_name(self) -> str:
+        return self.action_name
+    def __hash__(self):
+        return hash(self.action_name)
 
 class TopLevelComment(TopLevel):
     comment: str

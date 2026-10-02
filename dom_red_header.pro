@@ -32,12 +32,6 @@ tracked(Fact) :-
     call(Fact),
     record_fact(Fact).
 
-untracked(Call) :-
-    no_track,
-    call(Call),
-    track.
-
-% ...
 tracked_name(Name) :-
     atom(Name),
     record_fact(atom(Name)).
@@ -45,3 +39,17 @@ tracked_name(Name) :-
 tracked_executable(Name) :-
     assertz(executable(Name)),
     record_fact(executable(Name)).
+
+untracked(Call) :-
+    no_track,
+    call(Call),
+    track.
+
+% ================================
+run_all(Goal, AnyTrue) :-
+    nb_setval(run_all_any_true, false),
+    (   call(Goal),
+        nb_setval(run_all_any_true, true),
+        fail
+    ;   nb_getval(run_all_any_true, AnyTrue)
+    ).
