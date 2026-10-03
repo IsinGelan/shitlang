@@ -5,7 +5,7 @@ from typing import Iterator
 
 from pydantic import BaseModel
 
-from .helpers import dir_here, find, split
+from .helpers import LocalNumbers, dir_here, find, split, timed
 from .shit_objs import (
     Action,
     ComparisonExpr,
@@ -89,9 +89,10 @@ def executable_to_prolog(obj: Action | Method, static_preds: set[str]) -> str:
     type_tracks_str = "".join(f"  tracked({check}),\n" for check in type_checks)
     executable_track = f"  tracked_executable({executable_repr_name(obj)}),\n"
 
-    name_str = (f"method_{executable_code_name(obj)}{prolog_args(obj._task_params)} :-\n"
+    name_str = (f"{executable_code_name(obj)}{prolog_args(obj._task_params)} :-\n"
                 if isinstance(obj, Method) else
                 f"{executable_code_name(obj)}{prolog_args(obj.params)} :-\n")
+    # name_str = f"{executable_code_name(obj)}{prolog_args(obj.params)} :-\n"
 
     body = (
         pos_prec_checks
@@ -110,11 +111,18 @@ def executable_to_prolog(obj: Action | Method, static_preds: set[str]) -> str:
 def task_to_prolog(task: Task, methods: list[Method]) -> str:
     sig = f"{executable_code_name(task)}{prolog_args(task.params)}"
     header = f"{sig} :-\n"
-    body = (
-        f"  method_{sig}."
-        if len(methods) == 1 else
-        f"  run_all(method_{sig}, Results),\n  Results.")
-    return header + body
+    # body = (
+    #     f"  method_{sig}."
+    #     if len(methods) == 1 else
+    #     f"  run_all(method_{sig}, Results),\n  Results.")
+    local_numbers = LocalNumbers()
+    # call all methods
+    calls = "".join(
+        f"  call_rule({executable_code_name(method)}{prolog_args(task.params)}, Res{next(local_numbers)}),\n"
+        for method in methods)
+    # was any method true?
+    evals = "  ( " + "\n  ; ".join(f"Res{num} == true" for num in local_numbers.all_numbers()) + ")."
+    return header + calls + evals
 
 # ================================
 class ArgMapping(BaseModel):
@@ -288,7 +296,7 @@ def prolog_output_elements(prolog_output: str) -> tuple[set[str], set[FactExpr],
     objs: set[str] = set()
     executables: set[str] = set()
     for line in fact_lines:
-        print("F", line)
+        # print("F", line)
         fact = FactExpr.from_str(line)
         if fact.predicate_name.startswith("type"):
             obj: IdentifierConst = fact.args[0]
@@ -309,7 +317,7 @@ def prolog_output_elements(prolog_output: str) -> tuple[set[str], set[FactExpr],
 
 def get_required_facts(goal_call: TaskCall, filename: str = STD_PROLOG_EXPORT)  -> tuple[set[str], set[FactExpr]]:
     """Returns the facts needed for the given goal call."""
-    print(f">> Running Prolog file {filename!r} to get required predicates for {goal_call!r}")
+    print(f">> Running Prolog file {filename!r} to get required predicates for {str(goal_call)!r}")
     goal_call_str = prolog_executable_call(goal_call)
     command = f"swipl -q -g \"" \
         f"consult('{filename}'), start_tracking," \
@@ -328,6 +336,7 @@ def get_required_facts(goal_call: TaskCall, filename: str = STD_PROLOG_EXPORT)  
         print("Error executing Prolog command:", e)
         return FAILURE_ELEMENTS
 
+@timed
 def optimize_domain(
         domain: DomainFile,
         problem: ProblemFile, *, 
@@ -341,6 +350,7 @@ def optimize_domain(
         prolog_domain = PrologDomain.from_domain(domain)
         prolog_domain.move_preconditions_up()
         prolog_domain.export_to_prolog(false_preds=false_preds)
+    
     res = (req_objs, req_facts, req_execs) = get_required_facts(problem.goal)
     if res == FAILURE_ELEMENTS:
         print("  Domain optimization failed. Keeping original domain.")

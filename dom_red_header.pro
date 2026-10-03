@@ -46,6 +46,8 @@ untracked(Call) :-
     track.
 
 % ================================
+% this doesn't work cause run_all_any_true is not local,
+% so it will not work if subcalls of Goal also call run_all/2
 run_all(Goal, AnyTrue) :-
     nb_setval(run_all_any_true, false),
     (   call(Goal),
@@ -53,3 +55,8 @@ run_all(Goal, AnyTrue) :-
         fail
     ;   nb_getval(run_all_any_true, AnyTrue)
     ).
+
+call_rule(Goal, true) :-
+    call(Goal),
+    !.
+call_rule(_, false).

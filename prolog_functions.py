@@ -51,8 +51,10 @@ def executable_code_name(ex: Action | Method | Task) -> str:
     """Name of the executable in the prolog code"""
     if isinstance(ex, Action):
         return ex.action_name.replace("-", "_")
-    if isinstance(ex, (Task, Method)):
+    if isinstance(ex, Task):
         return ex.task_name.replace("-", "_")
+    if isinstance(ex, Method):
+        return ex.full_name.replace('-', '_')
 
 def executable_repr_name(ex: Action | Method | Task) -> str:
     """Name representing the executable, differentiates between methods and tasks"""

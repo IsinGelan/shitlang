@@ -68,3 +68,28 @@ def multi_insert(l: list, *insertions: Insertion) -> None:
 # ================================
 def dir_here(where: str = __file__) -> str:
     return path.dirname(path.realpath(where))
+
+# ================================
+def timed(func: Callable) -> Callable:
+    """Decorator to time a function and print its execution time."""
+    import time
+    def wrapper(*args, **kwargs):
+        start_time = time.time()
+        result = func(*args, **kwargs)
+        end_time = time.time()
+        elapsed_time = end_time - start_time
+        print(f"Function '{func.__name__}' executed in {elapsed_time:.4f} seconds.")
+        return result
+    return wrapper
+
+# ================================
+class LocalNumbers:
+    """to assign numbers locally and keep track of which numbers were assigned"""
+    def __init__(self):
+        self.highest = 0
+    def __next__(self):
+        res = self.highest
+        self.highest += 1
+        return res
+    def all_numbers(self) -> list[int]:
+        return list(range(self.highest))
