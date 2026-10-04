@@ -70,7 +70,7 @@ def dir_here(where: str = __file__) -> str:
     return path.dirname(path.realpath(where))
 
 # ================================
-def timed(func: Callable) -> Callable:
+def timed[C: Callable](func: C) -> C:
     """Decorator to time a function and print its execution time."""
     import time
     def wrapper(*args, **kwargs):

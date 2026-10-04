@@ -54,7 +54,7 @@ def executable_code_name(ex: Action | Method | Task) -> str:
     if isinstance(ex, Task):
         return ex.task_name.replace("-", "_")
     if isinstance(ex, Method):
-        return ex.full_name.replace('-', '_')
+        return ex.task_name.replace('-', '_')
 
 def executable_repr_name(ex: Action | Method | Task) -> str:
     """Name representing the executable, differentiates between methods and tasks"""

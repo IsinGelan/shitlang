@@ -89,10 +89,9 @@ def executable_to_prolog(obj: Action | Method, static_preds: set[str]) -> str:
     type_tracks_str = "".join(f"  tracked({check}),\n" for check in type_checks)
     executable_track = f"  tracked_executable({executable_repr_name(obj)}),\n"
 
-    name_str = (f"{executable_code_name(obj)}{prolog_args(obj._task_params)} :-\n"
+    name_str = (f"method_{executable_code_name(obj)}{prolog_args(obj._task_params)} :-\n"
                 if isinstance(obj, Method) else
                 f"{executable_code_name(obj)}{prolog_args(obj.params)} :-\n")
-    # name_str = f"{executable_code_name(obj)}{prolog_args(obj.params)} :-\n"
 
     body = (
         pos_prec_checks
@@ -111,18 +110,11 @@ def executable_to_prolog(obj: Action | Method, static_preds: set[str]) -> str:
 def task_to_prolog(task: Task, methods: list[Method]) -> str:
     sig = f"{executable_code_name(task)}{prolog_args(task.params)}"
     header = f"{sig} :-\n"
-    # body = (
-    #     f"  method_{sig}."
-    #     if len(methods) == 1 else
-    #     f"  run_all(method_{sig}, Results),\n  Results.")
-    local_numbers = LocalNumbers()
-    # call all methods
-    calls = "".join(
-        f"  call_rule({executable_code_name(method)}{prolog_args(task.params)}, Res{next(local_numbers)}),\n"
-        for method in methods)
-    # was any method true?
-    evals = "  ( " + "\n  ; ".join(f"Res{num} == true" for num in local_numbers.all_numbers()) + ")."
-    return header + calls + evals
+    body = (
+        f"  method_{sig}."
+        if len(methods) == 1 else
+        f"  run_all(method_{sig}, Results),\n  Results.")
+    return header + body
 
 # ================================
 class ArgMapping(BaseModel):
@@ -341,26 +333,34 @@ def optimize_domain(
         domain: DomainFile,
         problem: ProblemFile, *, 
         recompile_domain: bool = True,
-        false_preds: set[str] = set()) -> None:
-    """Optimizes the domain by removing unused predicates based on the goal call."""
+        static_preds: set[str] = None,
+        false_preds: set[str] = set()) -> bool:
+    """Optimizes the domain by removing unused predicates based on the goal call.\n
+    returns True if optimization was successful, False otherwise."""
     print(f">> Optimizing domain {domain.domain_name!r} based on problem {problem.problem_name!r}")
 
+    if static_preds is None:
+        static_preds = domain_static_preds(domain)
     if recompile_domain:
         # write_domain_to_prolog_file(domain, false_preds=false_preds)
         prolog_domain = PrologDomain.from_domain(domain)
-        prolog_domain.move_preconditions_up()
-        prolog_domain.export_to_prolog(false_preds=false_preds)
+        prolog_domain.move_preconditions_up(move_preds=static_preds)
+        prolog_domain.export_to_prolog(static_preds=static_preds, false_preds=false_preds)
     
     res = (req_objs, req_facts, req_execs) = get_required_facts(problem.goal)
     if res == FAILURE_ELEMENTS:
         print("  Domain optimization failed. Keeping original domain.")
-        return
+        return False
     
     print(f"   BEFORE:")
     print(f"   dom.consts: {domain.nr_consts:>4} | dom.facts: {problem.nr_facts:>4} | "
           f"dom.execs: {len(domain.top_level_elements):>4}")
-    
-    problem.fact_declarations = [fact for fact in problem.fact_declarations if fact in req_facts]
+
+    # keep only needed static facts, keep all non-static facts
+    problem.fact_declarations = [
+        fact for fact in problem.fact_declarations
+        if fact in req_facts or fact.predicate_name not in static_preds]
+    # keep only needed constants and executables
     domain.declared_constants = [
         ShitObjects(
             names=[name for name in cons.names if name in req_objs],
@@ -373,3 +373,4 @@ def optimize_domain(
     print(f"   AFTER:")
     print(f"   dom.consts: {domain.nr_consts:>4} | dom.facts: {problem.nr_facts:>4} | "
           f"dom.execs: {len(domain.top_level_elements):>4}")
+    return True
