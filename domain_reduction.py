@@ -5,6 +5,8 @@ from typing import Iterator
 
 from pydantic import BaseModel
 
+from .parser_domain import BASE_TYPE
+
 from .helpers import LocalNumbers, dir_here, find, split, timed
 from .shit_objs import (
     Action,
@@ -36,7 +38,6 @@ from .prolog_functions import (
     type_pred_name
 )
 
-
 HEADER_PATH = dir_here() + "/dom_red_header.pro"
 
 STD_PROLOG_EXPORT = "domain.pro"
@@ -58,7 +59,8 @@ def executable_to_prolog(obj: Action | Method, static_preds: set[str]) -> str:
     comp_exprs = [
         prec for prec in obj.precondition
         if isinstance(prec, ComparisonExpr)]
-    subtasks = [] if isinstance(obj, Action) else obj.subtasks.subtasks
+    subtasks: list[TaskCall] = [] if isinstance(obj, Action) else obj.subtasks.subtasks
+    #TODO: Adjust for SubtasksWithOrdering
 
     # Consts need to be defined even if they appear in ignored predicates
     necessary_consts = necessary_consts_for_executable(obj)
@@ -73,14 +75,29 @@ def executable_to_prolog(obj: Action | Method, static_preds: set[str]) -> str:
     # check pos preconditions. If unsuccessful, action couldnt execute
     pos_prec_checks = "".join(f"  {prolog_fact(fact)},\n" for fact in pos_precs)
     # check neg preconditions. If true (prohibits execution), record it
-    neg_prec_checks = "".join(
-        f"  (\n  {prolog_fact(fact)},\n"
-        "  no_track,\n"
-        f"{subtasks_str}"
-        "  track\n"
-        f"  -> tracked({prolog_fact(fact)}), fail\n"
-        "  ;  true),\n"
-        for fact in neg_precs)
+    untracked_subtasks_str = "".join(f"  untracked({prolog_executable_call(subtask)}),\n" for subtask in subtasks)
+    # neg_prec_checks = "".join(
+    #     f"  (\n  {prolog_fact(fact)},\n"
+    #     f"{untracked_subtasks_str}"
+    #     "  true\n"
+    #     f"  -> tracked({prolog_fact(fact)}), fail\n"
+    #     "  ;  true),\n"
+    #     for fact in neg_precs)
+    neg_prec_checks = (
+        "  (\n"
+        + ",\n".join(
+            f"    NP{num} \\= {prolog_fact(fact)}"
+            for num, fact in enumerate(neg_precs))
+        + "\n    -> true\n"
+        + "    ;\n"
+        + "".join(
+            f"    run_hypo({subtask.task_name}, {prolog_executable_call(subtask)}),\n"
+            for subtask in subtasks)
+        + ",\n".join(
+            f"    (NP{num} -> tracked({prolog_fact(fact)}); true)"
+            for num, fact in enumerate(neg_precs))
+        + "\n  ),\n"
+    ) if neg_precs else ""
 
     pos_prec_tracks = "".join(f"  tracked({prolog_fact(fact)}),\n" for fact in pos_precs)
     consts_tracks = "".join(
@@ -91,13 +108,13 @@ def executable_to_prolog(obj: Action | Method, static_preds: set[str]) -> str:
 
     name_str = (f"method_{executable_code_name(obj)}{prolog_args(obj._task_params)} :-\n"
                 if isinstance(obj, Method) else
-                f"{executable_code_name(obj)}{prolog_args(obj.params)} :-\n")
+                f"raw_{executable_code_name(obj)}{prolog_args(obj.params)} :-\n")
 
     body = (
         pos_prec_checks
         + neg_prec_checks # fact checks before type checks to allow early failing
+        + comp_exprs_str # let's try it here
         + type_checks_str # to keep the number of checked instantiations small
-        + comp_exprs_str
         + subtasks_str
         + consts_tracks
         + pos_prec_tracks
@@ -107,9 +124,15 @@ def executable_to_prolog(obj: Action | Method, static_preds: set[str]) -> str:
     body = body.removesuffix(",\n") + "."
     return name_str + body
 
+def untabled_callable_to_prolog(callable: Action | Task) -> str:
+    """The callable that will be called and calls internally its tabled raw callable"""
+    return f"{executable_code_name(callable)}{prolog_args(callable.params)} :-\n" \
+        f"  raw_{executable_code_name(callable)}{prolog_args(callable.params)},\n" \
+        f"  (hypothesis(_) -> true; tracked_executable({executable_repr_name(callable)}))."
+
 def task_to_prolog(task: Task, methods: list[Method]) -> str:
     sig = f"{executable_code_name(task)}{prolog_args(task.params)}"
-    header = f"{sig} :-\n"
+    header = f"raw_{sig} :-\n"
     body = (
         f"  method_{sig}."
         if len(methods) == 1 else
@@ -211,20 +234,33 @@ class PrologDomain(BaseModel):
 
     def _header(self, domain_fact_filename: str, false_preds: set[str] = set()) -> str:
         fact_import = f":- ensure_loaded('{domain_fact_filename}')."
+        # Prolog header providing all the traversing and tracking functionality
         header = prolog_header()
         top_level_signatures = {
             f"{executable_code_name(tl)}/{len(tl.params)}"
             for tl in self.domain.top_level_elements
             if isinstance(tl, (Action, Task))}
+        # Tabling Calls so that all callables are only computed once
         tabling_methods = "\n".join(
-            f":- table({signature})."
+            f":- table(raw_{signature})."
             for signature in top_level_signatures)
+        # Defining the type of all declared constants in the domain
         obj_type_defs = "\n".join(chain.from_iterable(
             prolog_type_def(cons) for cons in self.domain.declared_constants))
+        # Defining the type hierarchy of all declared types in the domain
+        type_hierarchy_defs = "\n".join(
+            f"type{ty.supertype}(X) :- type{subtype}(X)."
+            for ty in self.domain.declared_types for subtype in ty.names
+            if ty.supertype != BASE_TYPE)
+        # Suppressing discontiguous predicates
         type_discontiguous_suppression = "\n".join(
             f":- discontiguous({type_pred_name(name)}/1)."
             for ty in self.domain.declared_types for name in ty.names)
-        base_type_defs = "\n".join(f"type{name}(_) :- false." for ty in self.domain.declared_types for name in ty.names)
+        # So that Prolog recognizes type predicates for which no object is defined
+        base_type_defs = "\n".join(
+            f"type{name}(_) :- false."
+            for ty in self.domain.declared_types for name in ty.names)
+        # Predicates that are defined to be false (e.g. if not found in facts)
         false_pred_signatures = {
             (pred, decl.arity)
             for pred in false_preds
@@ -238,18 +274,24 @@ class PrologDomain(BaseModel):
             + tabling_methods + "\n\n"
             + type_discontiguous_suppression + "\n\n"
             + obj_type_defs + "\n\n"
+            + type_hierarchy_defs + "\n\n"
             + base_type_defs + "\n\n"
             + false_preds_definitions)
 
     def to_str(self, domain_fact_filename: str, static_preds: set[str], false_preds: set[str] = set()) -> str:
         task_blocks = [
-            task_to_prolog(task, self._task_methods(task.task_name)) + "\n" + "\n".join(
+            untabled_callable_to_prolog(task) + "\n"
+            + task_to_prolog(task, self._task_methods(task.task_name)) + "\n"
+            + "\n".join(
                 executable_to_prolog(method, static_preds) for method in self._task_methods(task_name)
             )
             for task_name, task in self.tasks.items()
         ]
         task_str = "\n\n".join(task_blocks)
-        action_str = "\n\n".join(executable_to_prolog(action, static_preds) for action in self.actions.values())
+        action_str = "\n\n".join(
+            untabled_callable_to_prolog(action) + "\n"
+            + executable_to_prolog(action, static_preds)
+            for action in self.actions.values())
         return (
             self._header(domain_fact_filename, false_preds) + "\n\n"
             + task_str + "\n\n"
@@ -288,7 +330,7 @@ def prolog_output_elements(prolog_output: str) -> tuple[set[str], set[FactExpr],
     objs: set[str] = set()
     executables: set[str] = set()
     for line in fact_lines:
-        # print("F", line)
+        print("F", line)
         fact = FactExpr.from_str(line)
         if fact.predicate_name.startswith("type"):
             obj: IdentifierConst = fact.args[0]
@@ -332,7 +374,7 @@ def get_required_facts(goal_call: TaskCall, filename: str = STD_PROLOG_EXPORT)  
 def optimize_domain(
         domain: DomainFile,
         problem: ProblemFile, *, 
-        recompile_domain: bool = True,
+        recompile_pro_domain: bool = True,
         static_preds: set[str] = None,
         false_preds: set[str] = set()) -> bool:
     """Optimizes the domain by removing unused predicates based on the goal call.\n
@@ -341,7 +383,7 @@ def optimize_domain(
 
     if static_preds is None:
         static_preds = domain_static_preds(domain)
-    if recompile_domain:
+    if recompile_pro_domain:
         # write_domain_to_prolog_file(domain, false_preds=false_preds)
         prolog_domain = PrologDomain.from_domain(domain)
         prolog_domain.move_preconditions_up(move_preds=static_preds)

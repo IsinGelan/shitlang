@@ -87,7 +87,7 @@ def prolog_comp_expr(comp: ComparisonExpr) -> str:
     left = prolog_variable(comp.left)
     right = prolog_variable(comp.right)
     assert comp.operator == "="
-    return f"{left} == {right}"
+    return f"{left} = {right}"
 def prolog_executable_call(call: TaskCall) -> str:
     return call.task_name.replace("-", "_") + prolog_args(call.args)
 
