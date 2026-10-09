@@ -5,6 +5,7 @@ from typing import Iterator
 
 from pydantic import BaseModel
 
+from .parser_domain import BASE_TYPE
 from .helpers import LocalNumbers, dir_here, find, split, timed
 from .shit_objs import (
     Action,
@@ -74,12 +75,13 @@ def executable_to_prolog(obj: Action | Method, static_preds: set[str]) -> str:
     pos_prec_checks = "".join(f"  {prolog_fact(fact)},\n" for fact in pos_precs)
     # check neg preconditions. If true (prohibits execution), record it
     neg_prec_checks = "".join(
-        f"  (\n  {prolog_fact(fact)},\n"
-        "  no_track,\n"
-        f"{subtasks_str}"
-        "  track\n"
-        f"  -> tracked({prolog_fact(fact)}), fail\n"
-        "  ;  true),\n"
+        # f"  (\n  {prolog_fact(fact)},\n"
+        # "  no_track,\n"
+        # f"{subtasks_str}"
+        # "  track\n"
+        # f"  -> tracked({prolog_fact(fact)}), fail\n"
+        # "  ;  true),\n"
+        f"  \\+ {prolog_fact(fact)},\n"
         for fact in neg_precs)
 
     pos_prec_tracks = "".join(f"  tracked({prolog_fact(fact)}),\n" for fact in pos_precs)
@@ -221,6 +223,10 @@ class PrologDomain(BaseModel):
             for signature in top_level_signatures)
         obj_type_defs = "\n".join(chain.from_iterable(
             prolog_type_def(cons) for cons in self.domain.declared_constants))
+        type_hierarchy_defs = "\n".join(
+            f"type{ty.supertype}(X) :- type{subtype}(X)."
+            for ty in self.domain.declared_types for subtype in ty.names
+            if ty.supertype != BASE_TYPE)
         type_discontiguous_suppression = "\n".join(
             f":- discontiguous({type_pred_name(name)}/1)."
             for ty in self.domain.declared_types for name in ty.names)
@@ -238,6 +244,7 @@ class PrologDomain(BaseModel):
             + tabling_methods + "\n\n"
             + type_discontiguous_suppression + "\n\n"
             + obj_type_defs + "\n\n"
+            + type_hierarchy_defs + "\n\n"
             + base_type_defs + "\n\n"
             + false_preds_definitions)
 
@@ -332,7 +339,7 @@ def get_required_facts(goal_call: TaskCall, filename: str = STD_PROLOG_EXPORT)  
 def optimize_domain(
         domain: DomainFile,
         problem: ProblemFile, *, 
-        recompile_domain: bool = True,
+        recompile_pro_domain: bool = True,
         static_preds: set[str] = None,
         false_preds: set[str] = set()) -> bool:
     """Optimizes the domain by removing unused predicates based on the goal call.\n
@@ -341,7 +348,7 @@ def optimize_domain(
 
     if static_preds is None:
         static_preds = domain_static_preds(domain)
-    if recompile_domain:
+    if recompile_pro_domain:
         # write_domain_to_prolog_file(domain, false_preds=false_preds)
         prolog_domain = PrologDomain.from_domain(domain)
         prolog_domain.move_preconditions_up(move_preds=static_preds)
