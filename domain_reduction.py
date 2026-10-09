@@ -64,7 +64,7 @@ def executable_to_prolog(obj: Action | Method, static_preds: set[str]) -> str:
     # Consts need to be defined even if they appear in ignored predicates
     necessary_consts = necessary_consts_for_executable(obj)
     
-    subtasks_str = "".join(f"  {prolog_executable_call(subtask)},\n" for subtask in subtasks)
+    subtasks_str = "".join(f"  run({prolog_executable_call(subtask)}),\n" for subtask in subtasks)
 
     neg_precs, pos_precs = split(fact_precs, lambda prec: prec.negated)
     # type checks to instantiate and check all parameters
@@ -75,12 +75,6 @@ def executable_to_prolog(obj: Action | Method, static_preds: set[str]) -> str:
     pos_prec_checks = "".join(f"  {prolog_fact(fact)},\n" for fact in pos_precs)
     # check neg preconditions. If true (prohibits execution), record it
     neg_prec_checks = "".join(
-        # f"  (\n  {prolog_fact(fact)},\n"
-        # "  no_track,\n"
-        # f"{subtasks_str}"
-        # "  track\n"
-        # f"  -> tracked({prolog_fact(fact)}), fail\n"
-        # "  ;  true),\n"
         f"  \\+ {prolog_fact(fact)},\n"
         for fact in neg_precs)
 
@@ -98,8 +92,8 @@ def executable_to_prolog(obj: Action | Method, static_preds: set[str]) -> str:
     body = (
         pos_prec_checks
         + neg_prec_checks # fact checks before type checks to allow early failing
-        + type_checks_str # to keep the number of checked instantiations small
         + comp_exprs_str
+        + type_checks_str # to keep the number of checked instantiations small
         + subtasks_str
         + consts_tracks
         + pos_prec_tracks
@@ -199,14 +193,12 @@ class PrologDomain(BaseModel):
         movable_prec = lambda prec: prec.predicate_name in move_preds if isinstance(prec, FactExpr) else True
         # TODO: replace by bottom up multi-source BFS
         while check_movements:
-            ex = check_movements.pop(0); #print(f"Checking {ex.impl_name}")
+            ex = check_movements.pop(0)
             precs_to_move = [prec for prec in ex.precondition if movable_prec(prec)]
-            # print(f"  # found {len(precs_to_move)} calls to move")
             if not precs_to_move:
                 continue
-            callers = self._called_at(ex); #print(f"  # found {len(callers)} call contexts")
+            callers = self._called_at(ex)
             for caller, arg_mapping in callers.items():
-                # print(f"  Moving precs to {caller.impl_name}")
                 mapped_precs = [arg_mapping.map_to_call_context(prec) for prec in precs_to_move]
                 caller.precondition.extend(mapped_precs)
                 check_movements.append(caller)
@@ -218,8 +210,8 @@ class PrologDomain(BaseModel):
             f"{executable_code_name(tl)}/{len(tl.params)}"
             for tl in self.domain.top_level_elements
             if isinstance(tl, (Action, Task))}
-        tabling_methods = "\n".join(
-            f":- table({signature})."
+        memoize_directives = "\n".join(
+            f":- memoize({signature})."
             for signature in top_level_signatures)
         obj_type_defs = "\n".join(chain.from_iterable(
             prolog_type_def(cons) for cons in self.domain.declared_constants))
@@ -241,7 +233,7 @@ class PrologDomain(BaseModel):
         return (
             fact_import + "\n\n"
             + header + "\n\n"
-            + tabling_methods + "\n\n"
+            + memoize_directives + "\n\n"
             + type_discontiguous_suppression + "\n\n"
             + obj_type_defs + "\n\n"
             + type_hierarchy_defs + "\n\n"

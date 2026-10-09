@@ -78,6 +78,8 @@ def prolog_variable(p: Param | ValuedExpr) -> str:
     raise ValueError("Expected Param or Identifier Argument. Other argument "
                      "types are not implemented for domain reduction")
 def prolog_args(args: list[Param | ValuedExpr]) -> str:
+    if not args:
+        return ""
     return "(" + ", ".join(prolog_variable(arg) for arg in args) + ")"
 
 def prolog_fact(fact: FactExpr) -> str:
@@ -87,7 +89,7 @@ def prolog_comp_expr(comp: ComparisonExpr) -> str:
     left = prolog_variable(comp.left)
     right = prolog_variable(comp.right)
     assert comp.operator == "="
-    return f"{left} == {right}"
+    return f"{left} = {right}"
 def prolog_executable_call(call: TaskCall) -> str:
     return call.task_name.replace("-", "_") + prolog_args(call.args)
 
