@@ -3,6 +3,8 @@ from typing import NamedTuple
 
 import pyparsing as pp
 
+from shitlang.helpers import static_file_hash
+
 BASE_TYPE = "object"
 # if we don't want surrounding brackets
 
@@ -282,6 +284,7 @@ file = pp.Group(
 
 # ================================
 class FileData(NamedTuple):
+    file_hash: str
     found_constants: set[str]
     found_types: set[str]
     found_predicates: set[tuple[str, int]]
@@ -294,8 +297,10 @@ class FileData(NamedTuple):
 def to_dicts(code: str) -> tuple[dict, FileData]:
     """returns dict, constants from file"""
     reset_file_data()
+    h = static_file_hash(code)
     res = file.parse_string(code+"\n", parse_all=True).as_dict().get("file", {})
     file_data = FileData(
+        file_hash=h,
         found_constants=file_constants,
         found_types=file_types,
         found_predicates=file_preds,

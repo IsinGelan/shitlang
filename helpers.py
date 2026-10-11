@@ -1,6 +1,9 @@
 
+import hashlib
 from os import path
-from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, Literal, Optional
+from typing import TYPE_CHECKING, Any, Callable, ClassVar, Iterable, Iterator, Literal, Optional
+
+from pydantic import BaseModel, ValidatorFunctionWrapHandler, model_validator
 if TYPE_CHECKING:
     from .shit_objs import ShitObject
 
@@ -69,6 +72,10 @@ def multi_insert(l: list, *insertions: Insertion) -> None:
 def dir_here(where: str = __file__) -> str:
     return path.dirname(path.realpath(where))
 
+def static_file_hash(code: str) -> str:
+    m = hashlib.sha256(code.encode("utf-8"))
+    return m.hexdigest()
+
 # ================================
 def timed[C: Callable](func: C) -> C:
     """Decorator to time a function and print its execution time."""
@@ -93,3 +100,77 @@ class LocalNumbers:
         return res
     def all_numbers(self) -> list[int]:
         return list(range(self.highest))
+
+# ================================
+def deserializable_poly_superclass(distinctor_attr_name: str):
+    """Decorator to make a polymorphic pydantic superclass deserializable.\n
+    Adds subclass registry. Use together with `@deserializer(distinctor_attr_name)`, like this:\n
+        @deserializable_poly_superclass("discriminator")
+        class Superclass(BaseModel):
+            discriminator: str | None = None
+            @deserializer("discriminator")
+            def deserialize(...):
+                pass
+    """
+    def decorator[C: type[BaseModel]](supercls: C) -> C:
+        reg: dict[str, type[C]] = {}
+        supercls._registry = reg
+
+        def __init_subclass__(cls, **kwargs) -> None:
+            super(cls).__init_subclass__(**kwargs)
+            name = cls.__name__
+            if name is supercls.__name__:
+                return
+            # print("Registering subclass:", name)
+            supercls._registry[name] = cls
+            setattr(cls, distinctor_attr_name, name)
+        
+        supercls.__init_subclass__ = classmethod(__init_subclass__)
+        supercls.model_rebuild()
+        return supercls
+
+    return decorator
+
+def deserializer(distinctor_attr_name: str):
+    """Mysterious decorator wrapping the deserializer method for a polymorphic class.\n
+    Fragile stuff! Do not touch!\n
+    The decorator fills in an empty method. Use like this:\n
+        @deserializer(<discriminator>)
+        def deserialize(<any arguments>) -> Any:
+            pass
+    """
+    def decorator(fun: Callable):
+        @model_validator(mode="wrap")
+        @classmethod
+        def _deserialize_polymorphic(cls: type[BaseModel], value: Any, handler: ValidatorFunctionWrapHandler) -> Any:
+            if not isinstance(value, dict):
+                return handler(value)
+            subclass = cls._registry.get(value.get(distinctor_attr_name))
+            if subclass == cls:
+                return handler(value)
+            if subclass is not None:
+                return subclass.model_validate(value)
+            return handler(value)
+        return _deserialize_polymorphic
+    return decorator
+
+# Generated class looks something like this:
+# class TopLevel(ShitObject):
+#     _registry: ClassVar[dict[str, type[Self]]] = {}
+#     
+#     def __init_subclass__(cls, **kwargs) -> None:
+#         super().__init_subclass__(**kwargs)
+#         name = cls.__name__
+#         if name is not TopLevel.__name__:
+#             print("Registering subclass:", name)
+#             TopLevel._registry[name] = cls
+#             setattr(cls, "poly_id", name)
+# 
+#     @model_validator(mode="wrap")
+#     @classmethod
+#     def _deserialize_polymorphic(cls, value: Any, handler: ValidatorFunctionWrapHandler) -> Any:
+#         if cls is TopLevel and isinstance(value, dict):
+#             subclass = cls._registry.get(value.get("poly_id"))
+#             if subclass is not None:
+#                 return subclass.model_validate(value)
+#         return handler(value)

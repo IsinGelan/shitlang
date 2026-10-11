@@ -1,11 +1,12 @@
 
 from itertools import product, chain
-from typing import Iterable, Iterator, NamedTuple, Self, Union
+from typing import Any, ClassVar, Iterable, Iterator, Self
 
-from pydantic import BaseModel, PrivateAttr
+from pydantic import BaseModel, PrivateAttr, ValidatorFunctionWrapHandler, model_validator
+from pydantic_core import from_json
 
 from .paths import ChildField, NodeOrigin, NodePredicate, PathData, PathType, path_descriptor, path_type, subpath
-from .helpers import last, pairs_overlapping
+from .helpers import deserializable_poly_superclass, deserializer, last, pairs_overlapping
 
 from . import lisp_objs as lo
 from .shit_errors import (
@@ -160,8 +161,13 @@ class Value(ShitObject):
 
 ValuedExpr = IdentifierConst | IdentifierParam | Value | FunctionCall
 
+@deserializable_poly_superclass("poly_id")
 class LogicalExpr(ShitObject):
-    pass
+    poly_id: str | None = None
+
+    @deserializer("poly_id")
+    def _deserialize_polymorphic(_) -> Any:
+        pass
 
 class ComparisonExpr(LogicalExpr):
     left: ValuedExpr
@@ -260,11 +266,16 @@ class TaskCall(ShitObject):
     def __str__(self):
         return f"{self.task_name}({', '.join(str(arg) for arg in self.args)})"
 
+@deserializable_poly_superclass("poly_id")
 class Subtasks(ShitObject):
-    pass
-
+    poly_id: str | None = None
+    
     def __iter__(self):
         ... 
+
+    @deserializer("poly_id")
+    def _deserialize_polymorphic(_) -> Any:
+        pass
 
 class SubtasksWithOrdering(Subtasks):
     subtasks: dict[int, TaskCall]
@@ -377,8 +388,14 @@ class Param(ShitObject):
     def to_lisp_objs(self):
         yield lo.Name(str(self))
 
+@deserializable_poly_superclass("poly_id")
 class TopLevel(ShitObject):
-    ...
+    # \/ for polymorphic serialization and deserialization \/
+    poly_id: str | None = None
+
+    @deserializer("poly_id")
+    def _deserialize_polymorphic(_) -> Any:
+        pass
 
 class Task(TopLevel):
     task_name: str
@@ -600,7 +617,8 @@ class ShitPredicate(ShitObject):
 # ================================ 
 class DomainFile(ShitObject):
     domain_name: str
-    # types: list[tuple[str, str]]
+
+    file_hash: str
     declared_types: list[ShitTypes] # types declared with a type statement
     declared_constants: list[ShitObjects] # constants declared with a const statement
     declared_predicates: list[ShitPredicate] # predicates declared with a pred statement
@@ -615,6 +633,7 @@ class DomainFile(ShitObject):
         type_decls = d["file_header"]["type_declarations"]
         const_decls = d["file_header"]["const_declarations"]
         pred_decls = d["file_header"]["pred_declarations"]
+        file_hash = file_data.file_hash
 
         declared_constants = [ShitObjects.from_dict(const) for const in const_decls]
         declared_types = [ShitTypes.from_dict(ty) for ty in type_decls]
@@ -639,6 +658,7 @@ class DomainFile(ShitObject):
         top_level_elems = [dict_to_top_level(e) for e in d.get("file_elements", [])]
 
         return cls(
+            file_hash=file_hash,
             domain_name=d["file_header"].get("domain_name", "???"),
             declared_types=declared_types,
             declared_constants=declared_constants,
@@ -766,10 +786,21 @@ class DomainFile(ShitObject):
 
     def to_str(self) -> str:
         return self.to_lisp_obj().to_hddl_str()
-    
-    def write_to_file(self, filename: str):
+    def export_hddl(self, filename: str):
         with open(filename, "w") as f:
             f.write(self.to_str())
+
+    def dump_json(self, filename: str):
+        import json
+        with open(filename, "w") as f:
+            json.dump(self.model_dump(
+                mode="json",
+                polymorphic_serialization=True
+            ), f)
+    @classmethod
+    def load_json(cls, filename: str):
+        with open(filename, "r") as f:
+            return cls.model_validate(from_json(f.read()))
 
 
 # ================================
@@ -823,10 +854,21 @@ class ProblemFile(ShitObject):
 
     def to_str(self) -> str:
         return self.to_lisp_obj().to_hddl_str()
-    
-    def write_to_file(self, filename: str):
+    def export_hddl(self, filename: str):
         with open(filename, "w") as f:
             f.write(self.to_str())
+
+    def dump_json(self, filename: str):
+        import json
+        with open(filename, "w") as f:
+            json.dump(self.model_dump(
+                mode="json",
+                polymorphic_serialization=True
+            ), f)
+    @classmethod
+    def load_json(cls, filename: str):
+        with open(filename, "r") as f:
+            return cls.model_validate(from_json(f.read()))
 
 
 # ================================
@@ -879,6 +921,3 @@ def dict_to_top_level(d: dict) -> TopLevel:
         return TopLevelComment.from_dict(d["comment"])
     raise ValueError(f"Invalid top-level element: {d}")
 
-# ================================
-def dicts_to_domain_file(dicts: list[dict], file_data: FileData) -> DomainFile:
-    return DomainFile.from_dict(dicts, file_data)

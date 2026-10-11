@@ -1,8 +1,8 @@
 
 from .main import (
-    transpile_domain,
-    transpile_domain_str,
-    transpile_problem,
-    transpile_problem_str,
-    EXAMPLE
+    parse_domain,
+    parse_domain_str,
+    get_domain,
+    get_problem,
 )
+from .domain_reduction import optimize_domain
