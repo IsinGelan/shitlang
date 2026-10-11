@@ -107,7 +107,15 @@ class ShitObject(BaseModel):
 
 
 # ================================
-class FunctionCall(ShitObject):
+@deserializable_poly_superclass("poly_id")
+class ValuedExpr(ShitObject):
+    poly_id: str | None = None
+
+    @deserializer("poly_id")
+    def _deserialize_polymorphic(_) -> Any:
+        pass
+
+class FunctionCall(ValuedExpr):
     """for state-variable like expressions, e.g. inv_num(dirt) -> int"""
     function_name: str
     args: list["ValuedExpr"]
@@ -133,7 +141,7 @@ class FunctionCall(ShitObject):
 class Identifier(ShitObject):
     name: str
 
-class IdentifierConst(Identifier):
+class IdentifierConst(ValuedExpr, Identifier):
     name: str
     
     def to_lisp_objs(self):
@@ -143,7 +151,7 @@ class IdentifierConst(Identifier):
     def __hash__(self):
         return hash(str(self))
 
-class IdentifierParam(Identifier):
+class IdentifierParam(ValuedExpr, Identifier):
     name: str
     
     def to_lisp_objs(self):
@@ -796,7 +804,7 @@ class DomainFile(ShitObject):
             json.dump(self.model_dump(
                 mode="json",
                 polymorphic_serialization=True
-            ), f)
+            ), f, indent=4)
     @classmethod
     def load_json(cls, filename: str):
         with open(filename, "r") as f:
