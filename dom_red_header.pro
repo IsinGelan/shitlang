@@ -76,7 +76,8 @@ run_memo(Goal) :-
     (   memo_cache(Goal, Result)
     ->  Result == true
     ;   evaluating(Goal)
-    ->  fail % Prevent infinite recursion (don't call the same goal while evaluating it)
+    ->  true% fail % Prevent infinite recursion (don't call the same goal while evaluating it)
+    % true here means we assume the goal being evaluated to succeed, which is too general
     ;   setup_call_cleanup(
             assertz(evaluating(Goal)),
             (   once(Goal)

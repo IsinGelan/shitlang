@@ -499,6 +499,7 @@ class Action(TopLevel):
     params: list[Param]
     precondition: list[LogicalExpr]
     postcondition: list[FactExpr]
+    annotation: str | None = None
 
     @classmethod
     def from_dict(cls, d: dict):
@@ -506,7 +507,8 @@ class Action(TopLevel):
             action_name=d["action_name"],
             params=[Param.from_dict(p) for p in d["action_params"]],
             precondition=[dict_to_logical_expr(p) for p in d["precondition"]],
-            postcondition=[dict_to_logical_expr(p) for p in d["postcondition"]]
+            postcondition=[dict_to_logical_expr(p) for p in d["postcondition"]],
+            annotation=anno.get("content") if (anno := d.get("annotation")) else None
         )
 
     @property
