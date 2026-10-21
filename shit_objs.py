@@ -273,6 +273,9 @@ class TaskCall(ShitObject):
 
     def __str__(self):
         return f"{self.task_name}({', '.join(str(arg) for arg in self.args)})"
+    def __hash__(self):
+        arg_names = tuple(str(arg) for arg in self.args)
+        return hash((self.task_name, arg_names))
 
 @deserializable_poly_superclass("poly_id")
 class Subtasks(ShitObject):
@@ -516,7 +519,10 @@ class Action(TopLevel):
         yield self.params
         yield self.precondition
         yield self.postcondition
-    
+    @property
+    def param_names(self) -> set[str]:
+        return {p.name for p in self.params}
+
     def to_lisp_objs(self):
         params = lo.ListInline([p.to_lisp_obj() for p in self.params])
         prec = [] if not self.precondition else [
@@ -695,6 +701,19 @@ class DomainFile(ShitObject):
         yield self.declared_constants
         yield self.declared_predicates
         yield self.top_level_elements
+
+    def get_tle[T: TopLevel](self, type: type[T], name: str) -> T | None:
+        """Get a top-level element by its name (task, method, action)"""
+        for tle in self.top_level_elements:
+            if not isinstance(tle, type):
+                continue
+            if isinstance(tle, Task) and tle.task_name == name:
+                return tle
+            if isinstance(tle, Method) and tle.full_name == name:
+                return tle
+            if isinstance(tle, Action) and tle.action_name == name:
+                return tle
+        return None
 
     def analyze_requirements(self) -> Iterator[str]:
         # TODO: analyze the structure to find the actual requirements
