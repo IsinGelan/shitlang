@@ -927,6 +927,8 @@ def dict_to_logical_expr(d: dict) -> LogicalExpr:
         return ComparisonExpr.from_dict(d["comparison"])
     elif "call" in d:
         return FactExpr.from_dict(d["call"])
+    elif "name" in d and "args" in d:
+        return FactExpr.from_dict(d)
     raise ValueError(f"Invalid logical expression: {d}")
 
 def dict_to_subtasks(d: dict) -> Subtasks:
