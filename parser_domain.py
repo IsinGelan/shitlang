@@ -117,23 +117,22 @@ true_args = (
 call = pp.Group(
     name.set_results_name("name")
     + args.set_results_name("args")
-    ).set_results_name("call")
+    )
 true_call = pp.Group(
     name.set_results_name("name")
     + true_args.set_results_name("args")
-    ).set_results_name("call")
+    )
 predicate_call = pp.Group(
     pp.Opt(pp.Literal("!") | pp.Literal("~")).set_results_name("negated")
     + name.set_results_name("name")
     + true_args.set_results_name("args")
-    ).set_results_name("call").add_parse_action(add_file_pred)
-# predicate_call = true_call.copy().add_parse_action(add_file_pred)
+    ).add_parse_action(add_file_pred)
 
 
 comment_include = pp.Group(
     pp.Suppress("##")
     + pp.rest_of_line.set_results_name("content")
-    ).set_results_name("comment")
+    )
 comment_ignore = pp.Regex("((?<!#))#(?!#)") + pp.SkipTo(pp.LineEnd())
 
 # ----------------------
@@ -141,14 +140,14 @@ comment_ignore = pp.Regex("((?<!#))#(?!#)") + pp.SkipTo(pp.LineEnd())
 comparator = pp.one_of("= != < > <= >=")
 expr_value = pp.Group(
     identifier
-    ^ true_call
+    ^ true_call("call")
     ^ number)
 expr_comparison = pp.Group(
     expr_value.set_results_name("left")
     + comparator.set_results_name("comparator")
     + expr_value.set_results_name("right")
-    ).set_results_name("comparison")
-logical_expr = predicate_call ^ expr_comparison
+    )
+logical_expr = predicate_call("call") ^ expr_comparison("comparison")
 
 # ----------------------
 # precondtion, postcondition
@@ -156,21 +155,21 @@ precondition = pp.Group(pp.Suppress("<") + logical_expr)
 postcondition = pp.Group(pp.Suppress(pp.Literal(">") ^ "=>") + logical_expr)
 method_precondition = pp.ZeroOrMore(
     precondition + pp.Suppress("\n")
-    ).set_results_name("precondition")
+    )
 action_postcondition = pp.ZeroOrMore(
     postcondition + pp.Suppress("\n")
-    ).set_results_name("postcondition")
+    )
 
 # ----------------------
 # subtasks
-subtask_uo = pp.Group(number.set_results_name("id") + call).set_parse_action(add_file_exec_call)
+subtask_uo = pp.Group(number("id") + call("call")).set_parse_action(add_file_exec_call)
 subtasks_unordered = pp.Group(
     pp.OneOrMore(subtask_uo + pp.Suppress("\n"))
-    ).set_results_name("subtasks_unordered")
-subtask_seq = pp.Group(pp.Suppress("-") + call).set_parse_action(add_file_exec_call)
+    )
+subtask_seq = pp.Group(pp.Suppress("-") + call("call")).set_parse_action(add_file_exec_call)
 subtasks_sequence = pp.Group(
     pp.OneOrMore(subtask_seq + pp.Suppress("\n"))
-    ).set_results_name("subtasks_sequence")#.add_parse_action(lambda t: print("SEQ", t))
+    )
 
 # ----------------------
 # orderings
@@ -179,19 +178,19 @@ order_num = pp.Group(number)
 order_seq = pp.Group(pp.Suppress("order") + pp.DelimitedList(order_group ^ order_num, delim="<", min=2))
 orderings = pp.Group(
     pp.OneOrMore(order_seq + pp.Suppress("\n"))
-    ).set_results_name("orderings")
-subtasks_with_orderings = subtasks_unordered + orderings
+    )
+subtasks_with_orderings = subtasks_unordered("subtasks_unordered") + orderings("orderings")
 
 # ----------------------
 # method
 task = pp.Group(
     pp.Suppress("task")
-    + name.set_results_name("task_name")
-    + params.set_results_name("task_params")
-).set_results_name("task").set_parse_action(add_file_task_decl)
+    + name("task_name")
+    + params("task_params")
+).set_parse_action(add_file_task_decl)
 
 method_identifier = (
-    name.set_results_name("task_name")
+    name("task_name")
     + pp.Opt(
         pp.Suppress(":")
         + name,
@@ -200,33 +199,33 @@ method_identifier = (
     )
 method_head = (
     method_identifier
-    + params.set_results_name("method_params")
+    + params("method_params")
     + pp.Suppress("\n"))
 
 method = pp.Group(
     method_head
-    + method_precondition
-    + (subtasks_with_orderings ^ subtasks_sequence)
-).set_results_name("method")
+    + method_precondition("precondition")
+    + (subtasks_with_orderings ^ subtasks_sequence("subtasks_sequence"))
+)
 
 # ----------------------
 # action
 action_head = (
     pp.Suppress("action")
-    + name.set_results_name("action_name")
-    + params.set_results_name("action_params")
+    + name("action_name")
+    + params("action_params")
     + pp.Suppress("\n")
     ).set_parse_action(add_file_action_decl)
 
-incomplete_ellipsis = pp.Group(pp.Suppress("...\n")).set_results_name("incomplete_ellipsis")
+incomplete_ellipsis = pp.Group(pp.Suppress("...\n"))
 
 action = pp.Group(
     action_head
     + pp.Opt(comment_include("annotation") + pp.Suppress("\n"))
-    + method_precondition
-    + action_postcondition
-    + pp.Opt(incomplete_ellipsis)
-).set_results_name("action")
+    + method_precondition("precondition")
+    + action_postcondition("postcondition")
+    + pp.Opt(incomplete_ellipsis("incomplete_ellipsis"))
+)
 
 # ----------------------
 # file header
@@ -241,25 +240,25 @@ type_decl = pp.Group(
 
 type_declarations = pp.Group(
     pp.ZeroOrMore(type_decl + pp.Suppress("\n"))
-    ).set_results_name("type_declarations")
+    )
 
 const_decl = pp.Group(
     pp.Suppress("const")
-    + pp.Group(pp.OneOrMore(name)).set_results_name("ids")
+    + pp.Group(pp.OneOrMore(name))("ids")
     + pp.Opt(
         pp.Suppress(":") + name,
         default=BASE_TYPE).set_parse_action(get_inner).set_results_name("type"))
 const_declarations = pp.Group(
     pp.ZeroOrMore(const_decl + pp.Suppress("\n"))
-    ).set_results_name("const_declarations")
+    )
 
 pred_decl = pp.Group(
     pp.Suppress("pred")
-    + name.set_results_name("pred_name")
-    + params.set_results_name("pred_params"))
+    + name("pred_name")
+    + params("pred_params"))
 pred_declarations = pp.Group(
     pp.ZeroOrMore(pred_decl + pp.Suppress("\n"))
-    ).set_results_name("pred_declarations")
+    )
 
 
 # ----------------------
@@ -269,12 +268,12 @@ pred_declarations = pp.Group(
 element_delim = pp.Suppress(pp.Regex(r"[ \t\n]*"))
 file_header = pp.Group(
     domain_name + element_delim
-    + type_declarations + pp.Opt(element_delim)
-    + const_declarations + pp.Opt(element_delim)
-    + pred_declarations
+    + type_declarations("type_declarations") + pp.Opt(element_delim)
+    + const_declarations("const_declarations") + pp.Opt(element_delim)
+    + pred_declarations("pred_declarations")
 ).set_fail_action(lambda *_: print("File header expected: domain, types, constants"))
 
-shit_element = pp.Group(task) ^ pp.Group(method) ^ pp.Group(action) ^ pp.Group(comment_include)
+shit_element = pp.Group(task("task")) ^ pp.Group(method("method")) ^ pp.Group(action("action")) ^ pp.Group(comment_include("comment"))
 
 file = pp.Group(
     pp.Opt(element_delim)
@@ -286,25 +285,28 @@ file = pp.Group(
     ).ignore(comment_ignore).set_results_name("file")
 
 def set_names():
-    global file, name, number, identifier, params, args, true_args, call, true_call, logical_expr, method_precondition, action_postcondition, subtasks_unordered, subtasks_sequence, orderings, subtasks_with_orderings, task, method, action, shit_element, type_decl, const_decl, pred_decl, comment_include, element_delim, domain_name, file_header
-    name =  name.set_name("name")
-    number =    number.set_name("number")
+    global file, name, number, identifier, params, args, true_args, call, true_call, logical_expr
+    global method_precondition, action_postcondition, subtasks_unordered, subtasks_sequence
+    global orderings, subtasks_with_orderings, task, method, action, shit_element, type_decl
+    global const_decl, pred_decl, comment_include, element_delim, domain_name, file_header
+    name =          name.set_name("name")
+    number =        number.set_name("number")
     identifier =    identifier.set_name("identifier")
-    params =    params.set_name("params")
-    args =  args.set_name("args")
+    params =        params.set_name("params")
+    args =          args.set_name("args")
     true_args =     true_args.set_name("true_args")
-    call =  call.set_name("call")
+    call =          call.set_name("call")
     true_call =     true_call.set_name("true_call")
     logical_expr =  logical_expr.set_name("logical_expr")
     method_precondition =   method_precondition.set_name("precondition")
     action_postcondition =  action_postcondition.set_name("effect")
     subtasks_unordered =    subtasks_unordered.set_name("subtasks_unordered")
     subtasks_sequence =     subtasks_sequence.set_name("subtasks_sequence")
-    orderings =     orderings.set_name("orderings")
+    orderings =             orderings.set_name("orderings")
     subtasks_with_orderings =   subtasks_with_orderings.set_name("subtasks_with_orderings")
-    task =  task.set_name("task")
-    method =    method.set_name("method")
-    action =    action.set_name("action")
+    task =          task.set_name("task")
+    method =        method.set_name("method")
+    action =        action.set_name("action")
     shit_element =  shit_element.set_name("hierarchical_element")
     type_decl =     type_decl.set_name("type_decl")
     const_decl =    const_decl.set_name("const_decl")
