@@ -1,6 +1,6 @@
 
 from itertools import product, chain
-from typing import Any, ClassVar, Iterable, Iterator, Self
+from typing import Any, ClassVar, Iterable, Iterator, Literal, Self
 
 from pydantic import BaseModel, PrivateAttr, ValidatorFunctionWrapHandler, model_validator
 from pydantic_core import from_json
@@ -132,7 +132,6 @@ class FunctionCall(ValuedExpr):
         yield self.args
     
     def to_lisp_objs(self):
-        # TODO: differentiate vars from consts
         yield lo.HeadArgsInline(
             self.function_name,
             [arg.to_lisp_obj() for arg in self.args]
@@ -169,8 +168,53 @@ class Value(ShitObject):
 
 ValuedExpr = IdentifierConst | IdentifierParam | Value | FunctionCall
 
+# ================================
+class Param(ShitObject):
+    name: str
+    type: str | None = None
+
+    @classmethod
+    def from_dict(cls, d: dict):
+        return cls(
+            name=d["param_name"],
+            type=d.get("param_type")
+        )
+
+    def __str__(self):
+        if self.type:
+            return f"?{self.name} - {self.type}"
+        return f"?{self.name}"
+
+    def __repr__(self):
+        if self.type:
+            return f"{self.name}: {self.type}"
+        return f"{self.name}"
+    
+    def to_lisp_objs(self):
+        yield lo.Name(str(self))
+
+# ================================
+class Quantifier(ShitObject):
+    # TODO: Make it a wrapper of LogicalExpr and a subtype as well
+    quantor: Literal["all"]
+    params: list[Param]
+
+    @classmethod
+    def from_dict(cls, d: dict):
+        return cls(
+            quantor=d["quantor"],
+            params=[Param.from_dict(p) for p in d["params"]]
+        )
+
+    def lisp_obj_wrapper(self, inner: lo.LispObject):
+        head = {"all": "forall", "some": "exists"}[self.quantor]
+        params = lo.ListInline([p.to_lisp_obj() for p in self.params])
+        return lo.HeadArgsFirstChildInline(head, [params, inner])
+
+
 @deserializable_poly_superclass("poly_id")
 class LogicalExpr(ShitObject):
+    quantifier: Quantifier | None = None
     poly_id: str | None = None
 
     @deserializer("poly_id")
@@ -184,12 +228,14 @@ class ComparisonExpr(LogicalExpr):
 
     @classmethod
     def from_dict(cls, d):
+        quantifier = Quantifier.from_dict(d["quantifier"]) if "quantifier" in d else None
         left = d["left"]
         right = d["right"]
         return cls(
             left=dict_to_valued_expr(left),
             operator=d["comparator"],
-            right=dict_to_valued_expr(right)
+            right=dict_to_valued_expr(right),
+            quantifier=quantifier
         )
 
     @property
@@ -198,10 +244,14 @@ class ComparisonExpr(LogicalExpr):
         yield self.right
     
     def to_lisp_objs(self):
-        yield lo.HeadArgsInline(
+        res = lo.HeadArgsInline(
             self.operator,
             [self.left.to_lisp_obj(), self.right.to_lisp_obj()]
             )
+        if self.quantifier:
+            yield self.quantifier.lisp_obj_wrapper(res)
+        else:
+            yield res
 
 class FactExpr(LogicalExpr):
     negated: bool = False
@@ -210,10 +260,12 @@ class FactExpr(LogicalExpr):
 
     @classmethod
     def from_dict(cls, d):
+        quantifier = Quantifier.from_dict(d["quantifier"]) if "quantifier" in d else None
         return cls(
-            negated="negated" in d,
-            predicate_name=d["name"],
-            args=[dict_to_valued_expr(arg) for arg in d["args"]]
+            negated="negated" in d["call"],
+            predicate_name=d["call"]["name"],
+            args=[dict_to_valued_expr(arg) for arg in d["call"]["args"]],
+            quantifier=quantifier
         )
     @classmethod
     def from_str(cls, s):
@@ -237,15 +289,15 @@ class FactExpr(LogicalExpr):
         yield self.args
 
     def to_lisp_objs(self):
-        # TODO: differentiate vars from consts
         inner = lo.HeadArgsInline(
             self.predicate_name,
             [arg.to_lisp_obj() for arg in self.args]
         )
-        if self.negated:
-            yield lo.HeadArgsInline("not", [inner])
+        res = lo.HeadArgsInline("not", [inner]) if self.negated else inner
+        if self.quantifier:
+            yield self.quantifier.lisp_obj_wrapper(res)
         else:
-            yield inner
+            yield res
 
 
 # ================================
@@ -265,7 +317,6 @@ class TaskCall(ShitObject):
         yield self.args
 
     def to_lisp_objs(self):
-        # TODO: differentiate vars from consts
         yield lo.HeadArgsInline(
             self.task_name,
             [arg.to_lisp_obj() for arg in self.args]
@@ -375,30 +426,6 @@ class SequencedSubtasks(Subtasks):
 
 
 # ================================
-class Param(ShitObject):
-    name: str
-    type: str | None = None
-
-    @classmethod
-    def from_dict(cls, d: dict):
-        return cls(
-            name=d["param_name"],
-            type=d.get("param_type")
-        )
-
-    def __str__(self):
-        if self.type:
-            return f"?{self.name} - {self.type}"
-        return f"?{self.name}"
-
-    def __repr__(self):
-        if self.type:
-            return f"{self.name}: {self.type}"
-        return f"{self.name}"
-    
-    def to_lisp_objs(self):
-        yield lo.Name(str(self))
-
 @deserializable_poly_superclass("poly_id")
 class TopLevel(ShitObject):
     # \/ for polymorphic serialization and deserialization \/
@@ -686,8 +713,6 @@ class DomainFile(ShitObject):
         )
 
     def model_post_init(self, context):
-        # - TODO: Find all types
-        # - Find all requirements
         self._tasks_signatures = self.tasks_signatures()
         self._requirements = self.analyze_requirements()
         self.validate_methods()
@@ -926,8 +951,9 @@ def dict_to_logical_expr(d: dict) -> LogicalExpr:
     if "comparison" in d:
         return ComparisonExpr.from_dict(d["comparison"])
     elif "call" in d:
-        return FactExpr.from_dict(d["call"])
+        return FactExpr.from_dict(d)
     elif "name" in d and "args" in d:
+        # From Problem
         return FactExpr.from_dict(d)
     raise ValueError(f"Invalid logical expression: {d}")
 

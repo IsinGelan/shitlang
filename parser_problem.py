@@ -64,7 +64,7 @@ obj_declarations = pp.Group(
     ).set_name("object_declarations")
 
 fact_declarations = pp.Group(
-    pp.ZeroOrMore(true_call + EOL)
+    pp.ZeroOrMore(pp.Group(true_call("call")) + EOL)
     ).set_name("fact_declarations")
 
 comment_ignore = pp.Literal("#") + pp.SkipTo(pp.LineEnd())

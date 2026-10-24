@@ -20,13 +20,20 @@ file_called_execs: set[tuple[str, int]] = set()
 file_declared_execs: set[tuple[str, int]] = set()
 file_negative_facts: bool = False
 current_params: set[str] = set()
+quantifier_params: set[str] = set()
 
 def set_current_params(tokens: pp.ParseResults):
     elems = tokens[0]
     param_names = [p[0] for p in elems]
     current_params.clear()
+    quantifier_params.clear()
     current_params.update(param_names)
     return tokens
+def set_quantifier_params(tokens: pp.ParseResults):
+    param_names = [p[0] for p in tokens]
+    quantifier_params.update(param_names)
+def clear_quantifier_params(*args):
+    quantifier_params.clear()
 def reset_file_constants():
     file_constants.clear()
 def add_file_constant(name: str):
@@ -78,7 +85,7 @@ def reset_file_data():
 
 def identify_id_type(tokens):
     tok = tokens[0]
-    if tok in current_params:
+    if tok in current_params.union(quantifier_params):
         return {"param": tok}
     else:
         file_constants.add(tok)
@@ -151,8 +158,21 @@ logical_expr = predicate_call("call") ^ expr_comparison("comparison")
 
 # ----------------------
 # precondtion, postcondition
-precondition = pp.Group(pp.Suppress("<") + logical_expr)
-postcondition = pp.Group(pp.Suppress(pp.Literal(">") ^ "=>") + predicate_call("call"))
+quantfier_word = pp.Literal("all")
+quantifier = pp.Group(
+    pp.Suppress("(")
+    + quantfier_word("quantor")
+    + pp.DelimitedList(param).set_parse_action(set_quantifier_params).set_results_name("params")
+    + pp.Suppress(")"))
+
+precondition = pp.Group(
+    pp.Suppress("<")
+    + pp.Opt(quantifier("quantifier"))
+    + logical_expr).set_parse_action(clear_quantifier_params)
+postcondition = pp.Group(
+    pp.Suppress(pp.Literal(">") ^ "=>")
+    + pp.Opt(quantifier("quantifier"))
+    + predicate_call("call")).set_parse_action(clear_quantifier_params)
 method_precondition = pp.ZeroOrMore(
     precondition + pp.Suppress("\n")
     ).set_name("precondition")
