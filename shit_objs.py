@@ -5,6 +5,8 @@ from typing import Any, ClassVar, Iterable, Iterator, Literal, Self
 from pydantic import BaseModel, PrivateAttr, ValidatorFunctionWrapHandler, model_validator
 from pydantic_core import from_json
 
+from tools.helpers import find
+
 from .paths import ChildField, NodeOrigin, NodePredicate, PathData, PathType, path_descriptor, path_type, subpath
 from .helpers import deserializable_poly_superclass, deserializer, last, pairs_overlapping
 
@@ -36,6 +38,8 @@ class ShitObject(BaseModel):
         for field in self._children_fields:
             if isinstance(field, ShitObject):
                 yield field
+            elif isinstance(field, dict):
+                yield from field.values()
             elif isinstance(field, Iterable):
                 yield from field
 
@@ -44,6 +48,10 @@ class ShitObject(BaseModel):
         for child_field in self._children_fields:
             if isinstance(child_field, ShitObject):
                 child_field._assign_origin(NodeOrigin(self, child_field))
+            elif isinstance(child_field, dict):
+                for child in child_field.values():
+                    assert isinstance(child, ShitObject)
+                    child._assign_origin(NodeOrigin(self, child_field))
             elif isinstance(child_field, Iterable):
                 for child in child_field:
                     assert isinstance(child, ShitObject)
@@ -727,6 +735,8 @@ class DomainFile(ShitObject):
         yield self.declared_predicates
         yield self.top_level_elements
 
+    # ------------------
+    # PUBLIC GETTERS
     def get_tle[T: TopLevel](self, type: type[T], name: str) -> T | None:
         """Get a top-level element by its name (task, method, action)"""
         for tle in self.top_level_elements:
@@ -740,6 +750,15 @@ class DomainFile(ShitObject):
                 return tle
         return None
 
+    def type_of(self, constant_name: str | IdentifierConst) -> str | None:
+        """returns None if constant does not exist"""
+        name = constant_name.name if isinstance(constant_name, IdentifierConst) else constant_name
+        decl = find(self.declared_constants, lambda consts: name in consts.names)
+        if not decl:
+            return None
+        return decl.type
+
+    # ------------------
     def analyze_requirements(self) -> Iterator[str]:
         # TODO: analyze the structure to find the actual requirements
         yield from [":typing"]

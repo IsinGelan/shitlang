@@ -1,11 +1,11 @@
 
-from typing import TYPE_CHECKING, Callable, Iterable, Iterator, Literal, NamedTuple, Union
+from typing import TYPE_CHECKING, Any, Callable, Iterable, Iterator, Literal, NamedTuple, Union
 
 if TYPE_CHECKING:
     from .shit_objs import ShitObject
 
 # ================================
-ChildField = Union[Iterable["ShitObject"], "ShitObject"]
+ChildField = Union[Iterable["ShitObject"], dict[Any, "ShitObject"], "ShitObject"]
 class NodeOrigin(NamedTuple):
     parent: Union["ShitObject", None]
     field: ChildField | None

@@ -59,7 +59,7 @@ def executable_to_prolog(obj: Action | Method, static_preds: set[str]) -> str:
     comp_exprs = [
         prec for prec in obj.precondition
         if isinstance(prec, ComparisonExpr)]
-    subtasks = [] if isinstance(obj, Action) else obj.subtasks.subtasks
+    subtasks = [] if isinstance(obj, Action) else list(obj.subtasks)
 
     # Consts need to be defined even if they appear in ignored predicates
     necessary_consts = necessary_consts_for_executable(obj)
