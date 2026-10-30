@@ -358,7 +358,9 @@ def optimize_domain(
     # keep only needed static facts, keep all non-static facts
     problem.fact_declarations = [
         fact for fact in problem.fact_declarations
-        if fact in req_facts or fact.predicate_name not in static_preds]
+        if fact in req_facts
+        or fact.predicate_name not in static_preds
+        or fact.negated]
     # keep only needed constants and executables
     domain.declared_constants = [
         ShitObjects(

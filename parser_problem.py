@@ -35,6 +35,12 @@ true_call = pp.Group(
     + true_args("args")
     ).set_name("true_call")
 
+predicate_call = pp.Group(
+    pp.Opt(pp.Literal("!") | pp.Literal("~")).set_results_name("negated")
+    + name.set_results_name("name")
+    + true_args.set_results_name("args")
+    ).set_name("predicate_call")
+
 # ================================
 pp.ParserElement.set_default_whitespace_chars(" \t\n")
 EOL = pp.LineEnd().suppress()
@@ -64,7 +70,7 @@ obj_declarations = pp.Group(
     ).set_name("object_declarations")
 
 fact_declarations = pp.Group(
-    pp.ZeroOrMore(pp.Group(true_call("call")) + EOL)
+    pp.ZeroOrMore(pp.Group(predicate_call("call")) + EOL)
     ).set_name("fact_declarations")
 
 comment_ignore = pp.Literal("#") + pp.SkipTo(pp.LineEnd())

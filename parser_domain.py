@@ -158,12 +158,12 @@ logical_expr = predicate_call("call") ^ expr_comparison("comparison")
 
 # ----------------------
 # precondtion, postcondition
-quantfier_word = pp.Literal("all")
+quantfier_word = pp.Literal("all") ^ "some"
 quantifier = pp.Group(
     pp.Suppress("(")
     + quantfier_word("quantor")
     + pp.DelimitedList(param).set_parse_action(set_quantifier_params).set_results_name("params")
-    + pp.Suppress(")"))
+    + pp.Suppress(")")).set_name("quantifier")
 
 precondition = pp.Group(
     pp.Suppress("<")

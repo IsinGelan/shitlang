@@ -8,7 +8,7 @@ from pydantic_core import from_json
 from tools.helpers import find
 
 from .paths import ChildField, NodeOrigin, NodePredicate, PathData, PathType, path_descriptor, path_type, subpath
-from .helpers import deserializable_poly_superclass, deserializer, last, pairs_overlapping
+from .helpers import deserializable_poly_superclass, deserializer, last, pairs_overlapping, split
 
 from . import lisp_objs as lo
 from .shit_errors import (
@@ -288,6 +288,22 @@ class FactExpr(LogicalExpr):
             predicate_name=predicate_name.strip(),
             args=args
         )
+    def as_positive(self) -> Self:
+        return FactExpr(
+            quantifier=self.quantifier,
+            negated=False,
+            predicate_name=self.predicate_name,
+            args=self.args.copy())
+    def as_negative(self) -> Self:
+        return FactExpr(
+            quantifier=self.quantifier,
+            negated=True,
+            predicate_name=self.predicate_name,
+            args=self.args.copy())
+    
+    def __str__(self):
+        neg = "~" if self.negated else ""
+        return f"{neg}{self.predicate_name}({', '.join(str(arg) for arg in self.args)})"
     def __hash__(self):
         arg_names = tuple(str(arg) for arg in self.args)
         return hash((self.negated, self.predicate_name, arg_names))
@@ -788,7 +804,6 @@ class DomainFile(ShitObject):
             if not isinstance(elem, Method):
                 continue
             if elem.task_name not in self._tasks_signatures:
-                print(self._tasks_signatures)
                 raise ValueError(f"Must define task '{elem.task_name}'! "
                                  f"(For method '{elem.full_name}')")
 
@@ -903,6 +918,16 @@ class ProblemFile(ShitObject):
     @property
     def nr_facts(self) -> int:
         return len(self.fact_declarations)
+    @property
+    def facts_pn(self) -> tuple[list[FactExpr], list[FactExpr]]:
+        """returns: (positive facts, negative facts)"""
+        return split(self.fact_declarations, lambda f: not f.negated)
+    @property
+    def write_facts(self) -> list[FactExpr]:
+        """Facts that are going to be written to HDDL file\n
+        (delete facts that are negated in the problem file)"""
+        positive_facts, negative_facts = self.facts_pn
+        return [fact for fact in positive_facts if fact.as_negative() not in set(negative_facts)]
 
     def to_lisp_objs(self):
         yield lo.HeadArgsFirstChildInline(
@@ -920,7 +945,7 @@ class ProblemFile(ShitObject):
                 ),
                 lo.HeadArgsIndented(
                     ":init",
-                    [fact.to_lisp_obj() for fact in self.fact_declarations]
+                    [fact.to_lisp_obj() for fact in self.write_facts]
                 )
             ]
         )

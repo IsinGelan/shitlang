@@ -28,7 +28,8 @@ def last[T](it: Iterable[T]) -> T | None:
     return last_el
 
 def split[T](it: Iterable[T], predicate: Callable[[T], bool]) -> tuple[list[T], list[T]]:
-    """Splits an iterable into two lists based on a predicate."""
+    """Splits an iterable into two lists based on a predicate.\n
+    returns (true_list, false_list)"""
     true_list = []
     false_list = []
     for el in it:
